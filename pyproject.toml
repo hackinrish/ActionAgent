@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "action-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-core>=0.3",
+    "langgraph>=0.5",
+    "langchain-mcp-adapters>=0.1.9",
+    "mcp>=1.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "fastapi>=0.128",
+    "uvicorn>=0.39",
+    "typer>=0.16",
+    "rich>=13.0",
+    "httpx>=0.28",
+    "anthropic>=0.57",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["action_agent*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

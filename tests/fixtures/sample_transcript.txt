@@ -1,0 +1,48 @@
+Meeting: Q2 Sprint Planning
+Date: 2026-04-30
+Participants: Alice Smith, Bob Jones, Carol White, David Lee
+
+---
+
+Alice Smith: Alright everyone, let's get started. We have a lot to cover today for Q2 planning.
+
+Bob Jones: Sounds good. Should we start with the backlog review?
+
+Alice Smith: Yes, let's do that. Carol, can you walk us through the priority items?
+
+Carol White: Sure. So the top priority is finishing the authentication refactor. We decided last week to move to OAuth2. I'll need Bob to complete the backend token validation by May 15th.
+
+Bob Jones: Got it, I'll make sure the token validation service is done by May 15th.
+
+Alice Smith: Great. David, what's the status on the mobile app performance issues?
+
+David Lee: We found the bottleneck — it's in the image loading pipeline. I'll fix the image caching layer and have a PR up by end of next week, let's say May 10th.
+
+Alice Smith: Perfect. We also need to update the API documentation before the partner demo on May 20th. Carol, can you own that?
+
+Carol White: Yes, I'll handle the API docs update. I'll have a draft ready by May 17th.
+
+Bob Jones: One thing I wanted to flag — we need to set up the staging environment for QA testing. I don't think anyone has picked that up yet.
+
+Alice Smith: Good point. David, can you take that on? Ideally before May 12th so QA has time.
+
+David Lee: Sure, I'll set up the staging environment by May 12th.
+
+Alice Smith: Also, we agreed last meeting to migrate our metrics dashboard to Grafana. Who's taking that?
+
+Bob Jones: I can do that. It's a bit of work but I'll scope it out and have a plan by May 8th.
+
+Alice Smith: Excellent. So to summarize our decisions today: we're moving forward with OAuth2 for auth, Grafana for metrics, and we're targeting the partner demo for May 20th. Any questions?
+
+Carol White: Should we schedule a check-in before the demo?
+
+Alice Smith: Good idea. Let's plan a review call on May 18th at 2pm. I'll send the invite.
+
+David Lee: Works for me.
+
+Bob Jones: Same here.
+
+Alice Smith: Great. Thanks everyone, let's get to it.
+
+---
+[Meeting ended]
