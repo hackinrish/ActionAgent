@@ -13,5 +13,6 @@ typer>=0.16
 rich>=13.0
 httpx>=0.28
 anthropic>=0.57
+aiofiles>=25.0
 pytest>=9.0
 pytest-asyncio>=1.3
