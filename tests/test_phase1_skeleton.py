@@ -123,7 +123,10 @@ def test_graph_has_expected_nodes():
     from action_agent.graph.builder import build_graph
     graph = build_graph()
     node_names = set(graph.nodes.keys())
-    for expected in ("summarize", "extract_actions", "assign_owners", "validate", "dispatch"):
+    for expected in (
+        "summarize", "extract_actions", "assign_owners", "validate",
+        "dispatch_notion", "dispatch_jira", "dispatch_slack", "aggregate_dispatch",
+    ):
         assert expected in node_names, f"Missing node: {expected}"
 
 

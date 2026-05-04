@@ -43,6 +43,8 @@ async def debrief(request: TranscriptRequest):
     from action_agent.config import settings
     from action_agent.graph.builder import build_graph
 
+    from action_agent.mcp.client import get_mcp_tools
+
     graph = build_graph()
     initial_state = {
         "transcript": request.transcript,
@@ -57,12 +59,14 @@ async def debrief(request: TranscriptRequest):
         "error": None,
         "status": "running",
     }
-    config = {"configurable": {"thread_id": "api-run"}}
 
-    final_updates: dict = {}
-    async for event in graph.astream(initial_state, config, stream_mode="updates"):
-        for updates in event.values():
-            final_updates.update(updates)
+    async with get_mcp_tools() as mcp_tools:
+        config = {"configurable": {"thread_id": "api-run", "mcp_tools": mcp_tools}}
+        final_updates: dict = {}
+        async for event in graph.astream(initial_state, config, stream_mode="updates"):
+            for updates in event.values():
+                if isinstance(updates, dict):
+                    final_updates.update(updates)
 
     merged = {**initial_state, **final_updates}
 

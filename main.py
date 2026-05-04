@@ -46,6 +46,8 @@ async def _run(transcript_path: Path, team_override: Optional[str], use_stubs: b
         else settings.team_members
     )
 
+    from action_agent.mcp.client import get_mcp_tools
+
     graph = build_graph()
     initial_state = {
         "transcript": transcript_text,
@@ -60,17 +62,18 @@ async def _run(transcript_path: Path, team_override: Optional[str], use_stubs: b
         "error": None,
         "status": "running",
     }
-    config = {"configurable": {"thread_id": "cli-run-001"}}
 
     console.print(Panel("[bold green]Meeting Debrief Agent[/bold green]", expand=False))
 
-    final_state: dict = {}
-    async for event in graph.astream(initial_state, config, stream_mode="updates"):
-        for node_name in event:
-            console.print(f"  [dim]✓ {node_name}[/dim]")
-            final_state.update(event[node_name])
+    async with get_mcp_tools() as mcp_tools:
+        config = {"configurable": {"thread_id": "cli-run-001", "mcp_tools": mcp_tools}}
+        final_state: dict = {}
+        async for event in graph.astream(initial_state, config, stream_mode="updates"):
+            for node_name, updates in event.items():
+                console.print(f"  [dim]✓ {node_name}[/dim]")
+                if isinstance(updates, dict):
+                    final_state.update(updates)
 
-    # Merge initial state with accumulated updates for a complete final picture
     merged = {**initial_state, **final_state}
     _print_results(merged)
 
