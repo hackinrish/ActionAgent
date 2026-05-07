@@ -35,6 +35,8 @@ async def _run(transcript_path: Path, team_override: Optional[str], use_stubs: b
     from action_agent.graph.builder import build_graph
     from action_agent.utils.formatting import build_action_items_table, print_dispatch_results
 
+    settings.use_stub_mcp = use_stubs
+
     if not transcript_path.exists():
         console.print(f"[red]File not found: {transcript_path}[/red]")
         raise typer.Exit(1)

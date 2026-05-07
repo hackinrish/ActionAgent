@@ -43,4 +43,45 @@ REAL_CONNECTIONS: dict = {
     },
 }
 
-ACTIVE_CONNECTIONS = STUB_CONNECTIONS
+ACTIVE_CONNECTIONS = STUB_CONNECTIONS  # legacy — prefer get_active_connections(settings)
+
+
+def get_active_connections(settings) -> dict:
+    """
+    Return the correct MCP connection set based on settings.use_stub_mcp.
+    When use_stub_mcp=False, REAL_CONNECTIONS env dicts are populated from settings.
+    """
+    if settings.use_stub_mcp:
+        return STUB_CONNECTIONS
+
+    return {
+        "notion": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@notionhq/notion-mcp-server"],
+            "env": {
+                "NOTION_API_KEY":    settings.notion_api_key,
+                "NOTION_DATABASE_ID": settings.notion_database_id,
+            },
+        },
+        "jira": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@atlassian/jira-mcp"],
+            "env": {
+                "JIRA_URL":       settings.jira_url,
+                "JIRA_EMAIL":     settings.jira_email,
+                "JIRA_API_TOKEN": settings.jira_api_token,
+                "JIRA_PROJECT_KEY": settings.jira_project_key,
+            },
+        },
+        "slack": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@slack/mcp-server"],
+            "env": {
+                "SLACK_BOT_TOKEN": settings.slack_bot_token,
+                "SLACK_CHANNEL":   settings.slack_channel,
+            },
+        },
+    }
