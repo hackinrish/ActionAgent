@@ -10,12 +10,12 @@ When code and Constitution conflict, the Constitution wins — fix the code._
 
 ActionAgent transforms unstructured meeting transcripts into structured, dispatched work.
 It ingests a raw transcript, runs a multi-agent LangGraph pipeline to extract and assign
-action items, validates them, and pushes the results to Notion (task database), Jira
-(issue tracker), and Slack (team broadcast) — without any manual post-meeting work.
+action items, validates them, and persists everything locally — tasks to a Database view,
+meeting history to a Meetings view, and a broadcast to the Channel feed.
 
 **Success criterion:** Given a meeting transcript and a list of team members, the system
-produces fully assigned, deadline-bearing action items and pushes them to all three
-external services within one pipeline run, requiring no human intervention.
+produces fully assigned, deadline-bearing action items and stores them in the local SQLite
+database within one pipeline run, requiring no human intervention and no external API keys.
 
 ---
 
@@ -24,21 +24,18 @@ external services within one pipeline run, requiring no human intervention.
 | Layer | Choice | Rationale |
 |---|---|---|
 | LLM | Anthropic Claude (claude-sonnet-4-6) | Best-in-class instruction following for structured extraction |
-| Agent orchestration | LangGraph 0.5+ (StateGraph) | Native parallel fan-out via `Send`, built-in checkpointing |
+| Agent orchestration | LangGraph 0.5+ (StateGraph) | Native graph pipeline, built-in checkpointing |
 | LLM client | langchain-anthropic + langchain-core | `with_structured_output` for schema-enforced extraction |
 | Data validation | Pydantic v2 | Runtime schema enforcement, IDE-friendly |
 | Config | pydantic-settings | `.env` + env var loading, typed settings |
-| Notion integration | notion-client (AsyncClient) | Official Python SDK, async-native |
-| Jira integration | jira (via asyncio.to_thread) | Mature REST wrapper; no async SDK exists |
-| Slack integration | slack-sdk (AsyncWebClient) | Official async SDK |
+| Local storage | aiosqlite | Async SQLite — meetings, tasks, channel_messages tables |
 | REST API | FastAPI | Async, SSE streaming, auto-docs |
-| Web UI | Vanilla HTML/JS | No build step, SSE-native via EventSource |
+| Web UI | Vanilla HTML/JS | No build step, SSE-native via EventSource, 4-tab SPA |
 | CLI | Typer + Rich | Clean UX, no boilerplate |
 | Testing | pytest + pytest-asyncio (asyncio_mode=auto) | Async-first, fixtures |
 
-**Not used:** MCP protocol, FastMCP stub servers, langchain-mcp-adapters.
-Dispatch nodes call the external SDKs directly. When credentials are absent,
-dispatch nodes run in dry-run mode and return synthetic success results.
+**Not used:** MCP protocol, external service SDKs (Notion, Jira, Slack).
+All dispatch writes directly to local SQLite via `action_agent/db.py`.
 
 ---
 
@@ -81,10 +78,39 @@ is_complete: bool                # True when no flagged items OR max attempts re
 
 ### DispatchResult
 ```
-tool: str          # "notion" | "jira" | "slack"
+tool: str          # "local"
 success: bool
-item_id: str | None
+item_id: str | None   # meeting UUID from local DB
 error_message: str | None
+```
+
+### Local DB Schema (SQLite, `local.db`)
+
+**meetings**
+```
+id: TEXT PK (uuid)
+thread_id: TEXT UNIQUE
+title, date, summary, participants (JSON), key_decisions (JSON): TEXT
+created_at: TEXT (ISO timestamp)
+```
+
+**tasks**
+```
+id: TEXT PK (uuid)
+meeting_id: TEXT FK → meetings.id
+description, owner, deadline, priority: TEXT
+status: TEXT DEFAULT 'todo'   # todo | in_progress | done
+needs_clarification: INTEGER (0/1)
+clarification_reason: TEXT
+created_at, updated_at: TEXT
+```
+
+**channel_messages**
+```
+id: TEXT PK (uuid)
+meeting_id: TEXT FK → meetings.id
+content: TEXT
+created_at: TEXT
 ```
 
 ---
@@ -100,10 +126,7 @@ START
                           │
                           ├─[flagged items AND attempts < max]─► extract_actions (retry)
                           │
-                          └─[valid OR max attempts reached]─► Send fan-out
-                                                                   ├─► dispatch_notion ─┐
-                                                                   ├─► dispatch_jira   ─┼─► aggregate_dispatch ─► END
-                                                                   └─► dispatch_slack  ─┘
+                          └─[valid OR max attempts reached]─► dispatch_local ─► aggregate_dispatch ─► END
 ```
 
 ### Node contracts
@@ -114,15 +137,14 @@ START
 | `extract_actions` | `transcript`, `summary`, `validation_result.flagged_items?` | `raw_action_items` |
 | `assign_owners` | `raw_action_items`, `team_members`, `transcript` | `assigned_action_items` |
 | `validate` | `assigned_action_items`, `validation_attempts` | `validation_result`, `validation_attempts` |
-| `dispatch_notion` | `validation_result`, `summary` | `dispatch_results` (appended) |
-| `dispatch_jira` | `validation_result` | `dispatch_results` (appended) |
-| `dispatch_slack` | `validation_result`, `summary` | `dispatch_results` (appended) |
-| `aggregate_dispatch` | `dispatch_results` | `status`, `dispatch_results` (normalized) |
+| `dispatch_local` | `validation_result`, `summary`, config thread_id | `dispatch_results` |
+| `aggregate_dispatch` | `dispatch_results` | `status`, `dispatch_results` |
 
 ### Dispatch behavior contract
-- **With credentials** (`NOTION_API_KEY`, `JIRA_URL`, `SLACK_BOT_TOKEN` all set): calls real SDK
-- **Without credentials (dry-run)**: returns `DispatchResult(success=True, item_id="dry-run-<id>")`
-- **On SDK error**: returns `DispatchResult(success=False, error_message=<exc>)`
+- `dispatch_local_node` always writes to SQLite — no credentials required
+- Creates/upserts meeting row, inserts tasks, inserts channel message
+- Returns `DispatchResult(tool="local", success=True, item_id=<meeting_uuid>)`
+- On DB error: returns `DispatchResult(tool="local", success=False, error_message=<exc>)`
 - Aggregate sets `status="error"` iff any dispatch has `success=False`; otherwise `status="complete"`
 
 ---
@@ -155,6 +177,23 @@ event: error
 data: {"type": "error", "message": str}
 ```
 
+### `GET /tasks`
+Query params: `meeting_id`, `status`, `owner` (all optional)
+Response: `list[dict]` — task rows from DB
+
+### `PATCH /tasks/{id}`
+Body: `{ "status"?: str, "owner"?: str, "deadline"?: str }`
+Response: updated task row
+
+### `GET /meetings`
+Response: `list[dict]` — meeting rows, newest first
+
+### `GET /meetings/{id}`
+Response: meeting row + `"tasks": list[dict]`
+
+### `GET /channel`
+Response: `list[dict]` — channel messages, newest first
+
 ### `GET /`
 Returns `frontend/index.html` (HTML, 200).
 
@@ -169,17 +208,10 @@ All settings read from `.env` via pydantic-settings.
 | `ANTHROPIC_API_KEY` | str | Agent pipeline (any run) |
 | `CLAUDE_MODEL` | str | Default: `claude-sonnet-4-6` |
 | `TEAM_MEMBERS` | comma-str | Assignment agent fallback |
-| `NOTION_API_KEY` | str | Live Notion dispatch |
-| `NOTION_DATABASE_ID` | str | Live Notion dispatch |
-| `JIRA_URL` | str | Live Jira dispatch |
-| `JIRA_EMAIL` | str | Live Jira dispatch |
-| `JIRA_API_TOKEN` | str | Live Jira dispatch |
-| `JIRA_PROJECT_KEY` | str | Live Jira dispatch |
-| `SLACK_BOT_TOKEN` | str | Live Slack dispatch |
-| `SLACK_CHANNEL` | str | Default: `#meeting-debriefs` |
+| `LOCAL_DB_PATH` | str | Default: `local.db` |
 | `MAX_VALIDATION_ATTEMPTS` | int | Default: `3` |
 
-Missing service credentials → dry-run mode for that service (not an error at startup).
+No external service credentials needed. Everything runs locally.
 
 ---
 
@@ -197,71 +229,33 @@ Each phase follows this gate protocol:
 ### Phase 1 — Foundation [COMPLETE ✅]
 _Models, state schema, config, project structure._
 
-**Deliverables:**
-- [x] `action_agent/models/schemas.py` — all Pydantic models
-- [x] `action_agent/models/state.py` — LangGraph `MeetingDebriefState` TypedDict
-- [x] `action_agent/config.py` — `Settings` (pydantic-settings, no MCP flags)
-- [x] `pyproject.toml`, `requirements.txt`
-- [x] `tests/test_phase1_skeleton.py` — 21 tests green
-
----
-
 ### Phase 2 — Agent Pipeline [COMPLETE ✅]
 _LLM-powered agents: summarize, extract, assign, validate._
 
-**Deliverables:**
-- [x] `action_agent/agents/summarizer.py`
-- [x] `action_agent/agents/action_extractor.py`
-- [x] `action_agent/agents/assignment.py`
-- [x] `action_agent/agents/validator.py`
-- [x] `action_agent/graph/` — nodes, conditions, builder
-- [x] `tests/test_phase2_llm.py` — 13 tests green
-
----
-
-### Phase 3 — Dispatch Layer (Direct SDK) [IN PROGRESS 🔄]
-_Replace MCP stubs with direct API SDK calls. Dry-run when credentials absent._
-
-**Deliverables:**
-- [ ] Remove `action_agent/mcp/` directory entirely
-- [ ] `action_agent/graph/nodes.py` — dispatch nodes using notion-client, jira, slack-sdk
-- [ ] Dry-run mode: `DispatchResult(success=True, item_id="dry-run-<id>")` when credentials blank
-- [ ] `tests/test_phase3_dispatch.py` — tests covering both dry-run and full graph
-
-**Test gate:** All Phase 3 tests GREEN before commit.
-
----
+### Phase 3 — Dispatch Layer (Direct SDK) [COMPLETE ✅]
+_Replaced with local SQLite dispatch. No external services._
 
 ### Phase 4 — CLI [COMPLETE ✅]
 _Typer CLI entry point with Rich output._
 
-**Deliverables:**
-- [x] `main.py` — `python main.py <transcript.txt> [--team "..."]`
-- [x] Rich table output for action items and dispatch results
-
----
-
 ### Phase 5 — REST API & Web UI [COMPLETE ✅]
 _FastAPI server with sync endpoint, SSE streaming, and HTML frontend._
 
-**Deliverables:**
-- [x] `api.py` — `/health`, `/debrief`, `/debrief/jobs`, `/debrief/jobs/{id}/stream`
-- [x] `frontend/index.html` — SSE-driven SPA
-- [x] `tests/test_phase5_api.py` — 10 tests green
+### Phase 6 — Hardening [COMPLETE ✅]
+_Structured JSON logging. Retry removed (no external calls to retry)._
 
----
-
-### Phase 6 — Live Integration & Hardening [COMPLETE ✅]
-_Wire real credentials; add retry logic, structured logging, run history._
+### Phase 7 — Local-First Revamp [COMPLETE ✅]
+_Removed Notion, Jira, Slack. Replaced with in-app equivalents stored in SQLite._
 
 **Deliverables:**
-- [x] Integration tests for Notion, Jira, Slack (auto-skip when credentials absent)
-- [x] Retry with exponential backoff (3 attempts) on dispatch SDK errors
-- [x] Structured JSON logging (`action_agent/utils/logging.py`) — `get_logger`, `log_node_event`
-- [x] `AsyncSqliteSaver` checkpointer for persistent run history
-- [x] `GET /runs/{thread_id}` endpoint to retrieve prior run state
-- [x] `POST /debrief` accepts optional `thread_id` for named runs
-- [x] `tests/test_phase6_hardening.py` — 26 passed, 3 skipped (live creds required)
+- [x] `action_agent/db.py` — SQLite schema + async CRUD helpers
+- [x] `dispatch_local_node` in `nodes.py` — single dispatch, writes meeting/tasks/channel
+- [x] Simplified graph (no parallel fan-out; linear → `dispatch_local`)
+- [x] Removed external service keys from `config.py` and `requirements.txt`
+- [x] New API endpoints: `GET /tasks`, `PATCH /tasks/{id}`, `GET /meetings`, `GET /meetings/{id}`, `GET /channel`
+- [x] Removed `GET /runs/{thread_id}`
+- [x] Rebuilt `frontend/index.html` — 4-tab SPA: Run, Board, Database, Channel
+- [x] `tests/test_phase7_local.py` — 29 tests green
 
 ---
 
@@ -269,7 +263,7 @@ _Wire real credentials; add retry logic, structured logging, run history._
 
 1. **Constitution first.** When adding a feature, update this document before writing code.
 2. **Tests before code.** Testing agent generates tests for each phase; implementation follows.
-3. **No MCP.** Dispatch nodes use SDK clients directly. MCP protocol is not part of this system.
-4. **Dry-run is not an error.** Missing credentials produce synthetic success results, not startup failures.
+3. **No external services.** All dispatch uses local SQLite. No API keys for dispatch.
+4. **Dry-run is not needed.** There is no external call — local write always works.
 5. **No silent drops.** Every action item is dispatched, even `needs_clarification=True` ones (tagged).
 6. **Green gate.** Nothing is committed until all non-skipped tests pass.

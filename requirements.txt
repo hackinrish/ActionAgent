@@ -12,10 +12,6 @@ rich>=13.0
 httpx>=0.28
 anthropic>=0.57
 aiofiles>=25.0
-langgraph-checkpoint-sqlite>=2.0
-aiosqlite==0.19.0
-notion-client>=2.2
-jira>=3.8
-slack-sdk>=3.33
+aiosqlite>=0.19
 pytest>=9.0
 pytest-asyncio>=1.3

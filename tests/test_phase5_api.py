@@ -88,9 +88,7 @@ async def test_debrief_post_dispatch_results():
         )
     body = resp.json()
     tool_names = {r["tool"] for r in body["dispatch_results"]}
-    assert "notion" in tool_names
-    assert "jira" in tool_names
-    assert "slack" in tool_names
+    assert "local" in tool_names
 
 
 # ── POST /debrief/jobs + GET /debrief/jobs/{id}/stream ────────────────────────
@@ -152,7 +150,7 @@ async def test_stream_sends_progress_and_complete_events():
     assert len(complete["data"]["action_items"]) > 0
 
 
-async def test_stream_complete_has_all_dispatch_tools():
+async def test_stream_complete_has_local_dispatch_tool():
     async with _client() as client:
         job_resp = await client.post(
             "/debrief/jobs",
@@ -173,4 +171,4 @@ async def test_stream_complete_has_all_dispatch_tools():
 
     assert complete_data is not None
     tool_names = {r["tool"] for r in complete_data["dispatch_results"]}
-    assert {"notion", "jira", "slack"} == tool_names
+    assert "local" in tool_names

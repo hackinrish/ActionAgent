@@ -2,12 +2,16 @@
 FastAPI server — serves the web UI and all API endpoints.
 
 Endpoints:
-  GET  /                          → serve frontend/index.html
-  GET  /health                    → {"status": "ok"}
-  POST /debrief                   → synchronous full pipeline result
-  POST /debrief/jobs              → create streaming job, returns {"job_id": "..."}
-  GET  /debrief/jobs/{id}/stream  → SSE stream of pipeline progress + final result
-  GET  /runs/{thread_id}          → retrieve prior run by thread_id
+  GET  /                           → serve frontend/index.html
+  GET  /health                     → {"status": "ok"}
+  POST /debrief                    → synchronous full pipeline result
+  POST /debrief/jobs               → create streaming job, returns {"job_id": "..."}
+  GET  /debrief/jobs/{id}/stream   → SSE stream of pipeline progress + final result
+  GET  /tasks                      → list tasks (optional ?meeting_id=, ?status=, ?owner=)
+  PATCH /tasks/{id}                → update task status/owner/deadline
+  GET  /meetings                   → list all meeting summaries
+  GET  /meetings/{id}              → single meeting + its tasks
+  GET  /channel                    → channel messages newest first
 """
 from __future__ import annotations
 
@@ -16,7 +20,7 @@ import uuid
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,15 +28,15 @@ from pydantic import BaseModel
 app = FastAPI(title="Meeting Debrief Agent", version="0.1.0")
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
-_RUNS_DB = str(Path(__file__).parent / ".actionagent_runs.db")
+
+
+def _db_path() -> str:
+    from action_agent.config import settings
+    return settings.local_db_path
+
 
 # In-memory job queue: job_id → TranscriptRequest
 _pending_jobs: dict[str, "TranscriptRequest"] = {}
-
-
-def _get_checkpointer():
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    return AsyncSqliteSaver.from_conn_string(_RUNS_DB)
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -40,7 +44,6 @@ def _get_checkpointer():
 class TranscriptRequest(BaseModel):
     transcript: str
     team_members: list[str] = []
-    thread_id: Optional[str] = None
 
 
 class DebriefResponse(BaseModel):
@@ -48,6 +51,12 @@ class DebriefResponse(BaseModel):
     summary: dict | None = None
     action_items: list[dict] = []
     dispatch_results: list[dict] = []
+
+
+class TaskUpdate(BaseModel):
+    status: Optional[str] = None
+    owner: Optional[str] = None
+    deadline: Optional[str] = None
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -87,43 +96,23 @@ def _merged_to_response(merged: dict) -> DebriefResponse:
     )
 
 
-def _checkpoint_to_response(checkpoint: dict) -> DebriefResponse:
-    """Build a DebriefResponse from a LangGraph checkpoint's channel_values."""
-    cv = checkpoint.get("channel_values", {})
-    status = cv.get("status", "complete")
-
-    vr = cv.get("validation_result")
-    if vr:
-        items = vr.valid_items + vr.flagged_items
-    else:
-        items = []
-
-    summary_obj = cv.get("summary")
-    return DebriefResponse(
-        status=status,
-        summary=summary_obj.model_dump() if summary_obj else None,
-        action_items=[i.model_dump() for i in items],
-        dispatch_results=[r.model_dump() for r in cv.get("dispatch_results", [])],
-    )
-
-
 # ── POST /debrief — synchronous ───────────────────────────────────────────────
 
 @app.post("/debrief", response_model=DebriefResponse)
 async def debrief(request: TranscriptRequest):
     from action_agent.graph.builder import build_graph
+    from langgraph.checkpoint.memory import MemorySaver
 
-    thread_id = request.thread_id or f"api-{uuid.uuid4().hex[:8]}"
+    thread_id = f"api-{uuid.uuid4().hex[:8]}"
     config = {"configurable": {"thread_id": thread_id}}
     initial_state = _build_initial_state(request)
     final_updates: dict = {}
 
-    async with _get_checkpointer() as checkpointer:
-        graph = build_graph(checkpointer=checkpointer)
-        async for event in graph.astream(initial_state, config, stream_mode="updates"):
-            for updates in event.values():
-                if isinstance(updates, dict):
-                    final_updates.update(updates)
+    graph = build_graph(checkpointer=MemorySaver())
+    async for event in graph.astream(initial_state, config, stream_mode="updates"):
+        for updates in event.values():
+            if isinstance(updates, dict):
+                final_updates.update(updates)
 
     merged = {**initial_state, **final_updates}
     return _merged_to_response(merged)
@@ -148,23 +137,23 @@ async def stream_job(job_id: str):
 
     async def generate() -> AsyncIterator[str]:
         from action_agent.graph.builder import build_graph
+        from langgraph.checkpoint.memory import MemorySaver
 
         def sse(event_type: str, data: dict) -> str:
             return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
-        thread_id = request.thread_id or f"sse-{job_id}"
+        thread_id = f"sse-{job_id}"
         config = {"configurable": {"thread_id": thread_id}}
         initial_state = _build_initial_state(request)
         final_updates: dict = {}
 
         try:
-            async with _get_checkpointer() as checkpointer:
-                graph = build_graph(checkpointer=checkpointer)
-                async for event in graph.astream(initial_state, config, stream_mode="updates"):
-                    for node_name, updates in event.items():
-                        yield sse("progress", {"node": node_name, "status": "complete"})
-                        if isinstance(updates, dict):
-                            final_updates.update(updates)
+            graph = build_graph(checkpointer=MemorySaver())
+            async for event in graph.astream(initial_state, config, stream_mode="updates"):
+                for node_name, updates in event.items():
+                    yield sse("progress", {"node": node_name, "status": "complete"})
+                    if isinstance(updates, dict):
+                        final_updates.update(updates)
 
             merged = {**initial_state, **final_updates}
             response = _merged_to_response(merged)
@@ -184,16 +173,61 @@ async def stream_job(job_id: str):
     )
 
 
-# ── GET /runs/{thread_id} — retrieve prior run ────────────────────────────────
+# ── GET /tasks ────────────────────────────────────────────────────────────────
 
-@app.get("/runs/{thread_id}", response_model=DebriefResponse)
-async def get_run(thread_id: str):
-    config = {"configurable": {"thread_id": thread_id}}
-    async with _get_checkpointer() as checkpointer:
-        checkpoint = await checkpointer.aget(config)
-    if checkpoint is None:
-        raise HTTPException(status_code=404, detail=f"No run found for thread_id '{thread_id}'")
-    return _checkpoint_to_response(checkpoint)
+@app.get("/tasks")
+async def list_tasks(
+    meeting_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    owner: Optional[str] = Query(None),
+):
+    from action_agent.db import get_tasks
+    return await get_tasks(_db_path(), meeting_id=meeting_id, status=status, owner=owner)
+
+
+# ── PATCH /tasks/{task_id} ────────────────────────────────────────────────────
+
+@app.patch("/tasks/{task_id}")
+async def patch_task(task_id: str, body: TaskUpdate):
+    from action_agent.db import update_task, get_task
+    found = await update_task(
+        _db_path(),
+        task_id=task_id,
+        status=body.status,
+        owner=body.owner,
+        deadline=body.deadline,
+    )
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    return await get_task(_db_path(), task_id=task_id)
+
+
+# ── GET /meetings ─────────────────────────────────────────────────────────────
+
+@app.get("/meetings")
+async def list_meetings():
+    from action_agent.db import get_meetings
+    return await get_meetings(_db_path())
+
+
+# ── GET /meetings/{meeting_id} ────────────────────────────────────────────────
+
+@app.get("/meetings/{meeting_id}")
+async def get_meeting_detail(meeting_id: str):
+    from action_agent.db import get_meeting, get_tasks
+    meeting = await get_meeting(_db_path(), meeting_id=meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail=f"Meeting '{meeting_id}' not found")
+    tasks = await get_tasks(_db_path(), meeting_id=meeting_id)
+    return {**meeting, "tasks": tasks}
+
+
+# ── GET /channel ──────────────────────────────────────────────────────────────
+
+@app.get("/channel")
+async def list_channel():
+    from action_agent.db import get_channel
+    return await get_channel(_db_path())
 
 
 # ── Frontend static files ─────────────────────────────────────────────────────
@@ -202,7 +236,7 @@ async def get_run(thread_id: str):
 async def serve_frontend():
     index = FRONTEND_DIR / "index.html"
     if not index.exists():
-        return {"message": "Frontend not built yet — run the app with Phase 5 complete"}
+        return {"message": "Frontend not built yet"}
     return FileResponse(index)
 
 

@@ -1,13 +1,10 @@
-import asyncio
+import uuid
 from langchain_core.runnables import RunnableConfig
-from notion_client import AsyncClient
-from jira import JIRA
-from slack_sdk.web.async_client import AsyncWebClient
 
 from action_agent.models.state import MeetingDebriefState
 from action_agent.models.schemas import DispatchResult, ActionItem
 
-_MAX_DISPATCH_RETRIES = 3
+_DEFAULT_DB = "local.db"
 
 
 # ── Core pipeline nodes ───────────────────────────────────────────────────────
@@ -61,117 +58,56 @@ def _items_from_state(state: dict) -> list[ActionItem]:
     return vr.valid_items + vr.flagged_items
 
 
-def _format_slack_message(summary, items: list[ActionItem]) -> str:
+def _format_channel_message(summary, items: list[ActionItem]) -> str:
     lines = ["*Meeting Debrief — Action Items*"]
     if summary:
         lines.append(f"_{summary.title}_\n")
     for item in items:
-        flag = " NEEDS CLARIFICATION" if item.needs_clarification else ""
+        flag = " [NEEDS CLARIFICATION]" if item.needs_clarification else ""
         owner = item.owner or "Unassigned"
         deadline = item.deadline or "No deadline"
-        lines.append(f"• [{item.id}] {item.description}")
+        lines.append(f"• {item.description}")
         lines.append(f"  Owner: {owner} | Due: {deadline} | Priority: {item.priority.value}{flag}")
     return "\n".join(lines)
 
 
-async def _with_retry(coro_fn, max_retries: int = _MAX_DISPATCH_RETRIES):
-    """Call an async factory `coro_fn` up to `max_retries` times; raise last exception on exhaustion."""
-    last_exc: Exception | None = None
-    for _ in range(max_retries):
-        try:
-            return await coro_fn()
-        except Exception as exc:
-            last_exc = exc
-    assert last_exc is not None
-    raise last_exc
+# ── Local dispatch node ───────────────────────────────────────────────────────
 
-
-# ── Parallel dispatch nodes ───────────────────────────────────────────────────
-
-async def dispatch_notion_node(state: dict, config: RunnableConfig) -> dict:
-    from action_agent.config import settings
-    items = _items_from_state(state)
-    results: list[DispatchResult] = []
-
-    if not settings.notion_api_key or not settings.notion_database_id:
-        for item in items:
-            results.append(DispatchResult(tool="notion", success=True, item_id=f"dry-run-{item.id}"))
-        return {"dispatch_results": results or [DispatchResult(tool="notion", success=True, item_id="dry-run")]}
-
-    client = AsyncClient(auth=settings.notion_api_key)
-    for item in items:
-        props: dict = {
-            "Name": {"title": [{"text": {"content": item.description}}]},
-            "Owner": {"rich_text": [{"text": {"content": item.owner or ""}}]},
-            "Priority": {"select": {"name": item.priority.value.capitalize()}},
-        }
-        if item.deadline:
-            props["Deadline"] = {"date": {"start": item.deadline}}
-
-        try:
-            page = await _with_retry(
-                lambda p=props: client.pages.create(
-                    parent={"database_id": settings.notion_database_id},
-                    properties=p,
-                )
-            )
-            results.append(DispatchResult(tool="notion", success=True, item_id=page["id"]))
-        except Exception as exc:
-            results.append(DispatchResult(tool="notion", success=False, error_message=str(exc)))
-
-    return {"dispatch_results": results or [DispatchResult(tool="notion", success=True, item_id="notion-empty")]}
-
-
-async def dispatch_jira_node(state: dict, config: RunnableConfig) -> dict:
-    from action_agent.config import settings
-    items = _items_from_state(state)
-    results: list[DispatchResult] = []
-
-    if not settings.jira_url or not settings.jira_api_token:
-        for item in items:
-            results.append(DispatchResult(tool="jira", success=True, item_id=f"DRY-{item.id}"))
-        return {"dispatch_results": results or [DispatchResult(tool="jira", success=True, item_id="DRY-empty")]}
-
-    jira_client = JIRA(
-        server=settings.jira_url,
-        basic_auth=(settings.jira_email, settings.jira_api_token),
+async def dispatch_local_node(
+    state: dict,
+    config: RunnableConfig,
+    *,
+    db_path: str = _DEFAULT_DB,
+) -> dict:
+    """Write meeting, tasks, and channel message to local SQLite DB."""
+    from action_agent.db import (
+        init_db, save_meeting, save_tasks, save_channel_message,
     )
-    for item in items:
-        fields = {
-            "project": {"key": settings.jira_project_key},
-            "summary": item.description,
-            "description": item.context or item.description,
-            "issuetype": {"name": "Task"},
-        }
-        try:
-            issue = await _with_retry(
-                lambda f=fields: asyncio.to_thread(jira_client.create_issue, fields=f)
-            )
-            results.append(DispatchResult(tool="jira", success=True, item_id=issue.key))
-        except Exception as exc:
-            results.append(DispatchResult(tool="jira", success=False, error_message=str(exc)))
 
-    return {"dispatch_results": results or [DispatchResult(tool="jira", success=True, item_id="PROJ-empty")]}
-
-
-async def dispatch_slack_node(state: dict, config: RunnableConfig) -> dict:
-    from action_agent.config import settings
     items = _items_from_state(state)
-    message = _format_slack_message(state.get("summary"), items)
+    summary = state.get("summary")
 
-    if not settings.slack_bot_token:
-        return {"dispatch_results": [DispatchResult(tool="slack", success=True, item_id="dry-run-slack")]}
+    # Use thread_id from config if available, otherwise generate
+    thread_id = (
+        (config or {}).get("configurable", {}).get("thread_id")
+        or f"run-{uuid.uuid4().hex[:8]}"
+    )
 
-    client = AsyncWebClient(token=settings.slack_bot_token)
     try:
-        resp = await _with_retry(
-            lambda: client.chat_postMessage(channel=settings.slack_channel, text=message)
+        await init_db(db_path)
+        meeting_id = await save_meeting(db_path, thread_id=thread_id, summary=summary)
+        from action_agent.models.schemas import ValidationResult
+        vr = state.get("validation_result") or ValidationResult(
+            valid_items=[], flagged_items=[], is_complete=True
         )
-        return {"dispatch_results": [DispatchResult(
-            tool="slack", success=resp["ok"], item_id=resp.get("ts", "sent")
-        )]}
+        await save_tasks(db_path, meeting_id=meeting_id, validation_result=vr)
+
+        message = _format_channel_message(summary, items)
+        await save_channel_message(db_path, meeting_id=meeting_id, content=message)
+
+        return {"dispatch_results": [DispatchResult(tool="local", success=True, item_id=meeting_id)]}
     except Exception as exc:
-        return {"dispatch_results": [DispatchResult(tool="slack", success=False, error_message=str(exc))]}
+        return {"dispatch_results": [DispatchResult(tool="local", success=False, error_message=str(exc))]}
 
 
 async def aggregate_dispatch_node(state: MeetingDebriefState, config: RunnableConfig) -> dict:

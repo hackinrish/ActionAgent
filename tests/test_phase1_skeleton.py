@@ -34,9 +34,12 @@ def test_graph_import():
 
 
 def test_dispatch_nodes_import():
-    from action_agent.graph.nodes import (
-        dispatch_notion_node, dispatch_jira_node, dispatch_slack_node,
-    )
+    from action_agent.graph.nodes import dispatch_local_node  # noqa: F401
+
+
+def test_db_module_importable():
+    from action_agent import db  # noqa: F401
+    assert db is not None
 
 
 # ── Pydantic model validation ─────────────────────────────────────────────────
@@ -126,7 +129,7 @@ def test_graph_has_expected_nodes():
     node_names = set(graph.nodes.keys())
     for expected in (
         "summarize", "extract_actions", "assign_owners", "validate",
-        "dispatch_notion", "dispatch_jira", "dispatch_slack", "aggregate_dispatch",
+        "dispatch_local", "aggregate_dispatch",
     ):
         assert expected in node_names, f"Missing node: {expected}"
 
@@ -176,23 +179,6 @@ def test_validation_mixed_items():
     result = agent.run(items=items, attempt=1)
     assert len(result.valid_items) == 1
     assert len(result.flagged_items) == 1
-
-
-# ── Direct SDK packages importable ───────────────────────────────────────────
-
-def test_notion_client_importable():
-    import notion_client
-    assert notion_client is not None
-
-
-def test_jira_importable():
-    import jira
-    assert jira is not None
-
-
-def test_slack_sdk_importable():
-    import slack_sdk
-    assert slack_sdk is not None
 
 
 # ── CLI help ──────────────────────────────────────────────────────────────────

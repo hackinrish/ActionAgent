@@ -5,540 +5,715 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Meeting Debrief Agent</title>
   <style>
-    /* ── Reset & base ───────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:         #0f172a;
-      --surface:    #1e293b;
-      --surface2:   #273549;
-      --border:     #334155;
-      --text:       #f1f5f9;
-      --muted:      #94a3b8;
-      --accent:     #10b981;
-      --accent-dim: #064e3b;
-      --blue:       #3b82f6;
-      --blue-dim:   #1e3a5f;
-      --warn:       #f59e0b;
-      --warn-dim:   #451a03;
-      --danger:     #ef4444;
-      --radius:     10px;
-      --shadow:     0 4px 24px rgba(0,0,0,.4);
+      --bg:        #0f172a;
+      --surface:   #1e293b;
+      --surface2:  #273549;
+      --border:    #334155;
+      --text:      #f1f5f9;
+      --muted:     #94a3b8;
+      --accent:    #10b981;
+      --blue:      #3b82f6;
+      --warn:      #f59e0b;
+      --danger:    #ef4444;
+      --purple:    #a855f7;
+      --radius:    10px;
     }
 
     body {
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 15px;
-      line-height: 1.6;
+      font-size: 14px;
+      line-height: 1.55;
       min-height: 100vh;
     }
 
-    /* ── Layout ─────────────────────────────────────────────────────────────── */
-    .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+    /* ── Layout ── */
+    .page { max-width: 1200px; margin: 0 auto; padding: 0 20px 60px; }
 
     header {
       display: flex; align-items: center; gap: 12px;
-      padding: 28px 0 32px;
+      padding: 22px 0 24px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 32px;
+      margin-bottom: 0;
     }
-    .logo { font-size: 28px; }
-    header h1 { font-size: 22px; font-weight: 700; }
-    header p  { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    header h1 { font-size: 20px; font-weight: 700; }
+    header p  { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
-    /* ── Card ────────────────────────────────────────────────────────────────── */
+    /* ── Tabs ── */
+    .tabs {
+      display: flex; gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+      position: sticky; top: 0; background: var(--bg); z-index: 10;
+      padding-top: 4px;
+    }
+    .tab-btn {
+      background: none; border: none; color: var(--muted);
+      padding: 12px 20px; font-size: 13px; font-weight: 500;
+      cursor: pointer; border-bottom: 2px solid transparent;
+      margin-bottom: -1px; transition: color .15s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--text); border-bottom-color: var(--blue); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Shared card ── */
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 24px;
-      margin-bottom: 20px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
     }
     .card-title {
-      font-size: 13px; font-weight: 600; letter-spacing: .06em;
-      text-transform: uppercase; color: var(--muted);
-      margin-bottom: 14px;
+      font-size: 11px; font-weight: 600; letter-spacing: .07em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 14px;
     }
 
-    /* ── Form ────────────────────────────────────────────────────────────────── */
-    .field { margin-bottom: 16px; }
-    label  { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--muted); }
-
-    textarea, input[type="text"] {
-      width: 100%; padding: 10px 14px;
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: 7px; color: var(--text);
-      font-family: inherit; font-size: 14px;
-      resize: vertical; outline: none;
+    /* ── Forms ── */
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+    textarea, input[type=text] {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 10px 12px;
+      font-size: 13px; font-family: inherit; resize: vertical;
       transition: border-color .15s;
     }
-    textarea { min-height: 220px; }
-    textarea:focus, input[type="text"]:focus { border-color: var(--blue); }
-
-    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
-
-    button {
-      padding: 10px 22px; border: none; border-radius: 7px;
-      font-size: 14px; font-weight: 600; cursor: pointer;
-      transition: opacity .15s, transform .1s;
+    textarea:focus, input[type=text]:focus {
+      outline: none; border-color: var(--blue);
     }
-    button:hover:not(:disabled) { opacity: .88; }
-    button:active:not(:disabled) { transform: scale(.97); }
-    button:disabled { opacity: .4; cursor: not-allowed; }
+    .form-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 14px; }
 
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-
-    /* ── Pipeline progress ───────────────────────────────────────────────────── */
-    .pipeline {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-      margin-bottom: 8px;
+    /* ── Buttons ── */
+    button.primary {
+      background: var(--blue); color: #fff; border: none; border-radius: 6px;
+      padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: opacity .15s;
     }
+    button.primary:hover { opacity: .85; }
+    button.primary:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* ── Progress ── */
+    .progress-bar {
+      height: 3px; background: var(--border); border-radius: 2px;
+      margin: 14px 0; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: var(--blue); border-radius: 2px;
+      width: 0%; transition: width .4s ease;
+    }
+    .progress-steps { display: flex; flex-direction: column; gap: 6px; }
     .step {
-      display: flex; align-items: center; gap: 6px;
-      padding: 5px 12px; border-radius: 20px;
-      font-size: 12px; font-weight: 500;
-      background: var(--surface2); color: var(--muted);
-      border: 1px solid var(--border);
-      transition: all .3s;
+      display: flex; align-items: center; gap: 8px; font-size: 12px;
+      color: var(--muted); transition: color .2s;
     }
-    .step.active  { background: var(--blue-dim);  color: var(--blue);   border-color: var(--blue); }
-    .step.done    { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-    .step .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-    .step.active .dot { animation: pulse 1s infinite; }
-    .step-arrow { color: var(--border); font-size: 11px; }
+    .step.done { color: var(--accent); }
+    .step-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--border); flex-shrink: 0; transition: background .2s;
+    }
+    .step.done .step-dot { background: var(--accent); }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: .3; }
-    }
+    /* ── Summary box ── */
+    .summary-box { background: var(--surface2); border-radius: 8px; padding: 16px; }
+    .summary-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+    .summary-text { color: var(--muted); font-size: 13px; }
+    .kv-list { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px; }
+    .kv { font-size: 12px; color: var(--muted); }
+    .kv strong { color: var(--text); }
 
-    /* ── Spinner ─────────────────────────────────────────────────────────────── */
-    .spinner {
-      width: 18px; height: 18px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-      display: inline-block;
+    /* ── Action items list ── */
+    .items-grid { display: flex; flex-direction: column; gap: 10px; }
+    .item-row {
+      background: var(--surface2); border-radius: 8px; padding: 12px 14px;
+      display: grid; grid-template-columns: 1fr auto auto auto;
+      gap: 10px; align-items: start;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Summary card ────────────────────────────────────────────────────────── */
-    .summary-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-    .tag {
-      padding: 3px 10px; border-radius: 20px; font-size: 12px;
-      background: var(--surface2); color: var(--muted);
-      border: 1px solid var(--border);
-    }
-    .summary-text { margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.7; }
-    .decisions    { margin-top: 12px; }
-    .decision-item {
-      padding: 7px 12px; margin-bottom: 6px; border-radius: 6px;
-      background: var(--surface2); border-left: 3px solid var(--accent);
-      font-size: 13px; color: var(--muted);
-    }
-
-    /* ── Action items table ──────────────────────────────────────────────────── */
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th {
-      text-align: left; padding: 9px 12px;
-      color: var(--muted); font-size: 11px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: .06em;
-      border-bottom: 1px solid var(--border);
-    }
-    td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: var(--surface2); }
-
+    .item-desc { font-size: 13px; font-weight: 500; }
+    .item-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
     .badge {
-      display: inline-block; padding: 2px 8px; border-radius: 4px;
-      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+      font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px;
+      text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
     }
-    .badge-ok     { background: var(--accent-dim); color: var(--accent); }
-    .badge-warn   { background: var(--warn-dim);   color: var(--warn); }
-    .badge-high   { background: #3b1919; color: #f87171; }
-    .badge-medium { background: #1c2a3b; color: #60a5fa; }
-    .badge-low    { background: var(--surface2); color: var(--muted); }
+    .badge-high     { background: #7f1d1d; color: #fca5a5; }
+    .badge-critical { background: #4c0519; color: #f9a8d4; }
+    .badge-medium   { background: #451a03; color: #fbbf24; }
+    .badge-low      { background: #052e16; color: #86efac; }
+    .badge-clarify  { background: #312e81; color: #c7d2fe; }
+    .badge-todo        { background: #1e293b; color: var(--muted); border: 1px solid var(--border); }
+    .badge-in_progress { background: #1e3a5f; color: #93c5fd; }
+    .badge-done        { background: #052e16; color: #86efac; }
 
-    .item-id { font-family: monospace; font-size: 12px; color: var(--muted); }
-    .item-desc { font-weight: 500; }
-    .item-context { font-size: 11px; color: var(--muted); margin-top: 3px; font-style: italic; }
+    /* ── Error / info ── */
+    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
+    .alert-error { background: #450a0a; border: 1px solid #991b1b; color: #fca5a5; }
+    .alert-info  { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); }
 
-    /* ── Dispatch cards ──────────────────────────────────────────────────────── */
-    .dispatch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    @media (max-width: 640px) { .dispatch-grid { grid-template-columns: 1fr; } }
-
-    .dispatch-card {
-      border-radius: var(--radius); padding: 16px;
-      border: 1px solid var(--border); background: var(--surface2);
+    /* ── Board (Jira-like) ── */
+    .board {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
     }
-    .dispatch-card.success { border-color: var(--accent); }
-    .dispatch-card.failure { border-color: var(--danger); }
-
-    .dispatch-icon   { font-size: 22px; margin-bottom: 8px; }
-    .dispatch-name   { font-weight: 700; font-size: 15px; }
-    .dispatch-count  { font-size: 12px; color: var(--muted); margin-top: 3px; }
-    .dispatch-status { margin-top: 8px; }
-
-    /* ── Utility ─────────────────────────────────────────────────────────────── */
-    .hidden   { display: none !important; }
-    .section-title {
-      font-size: 16px; font-weight: 700; margin-bottom: 14px;
+    .column {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px;
+      min-height: 200px;
+    }
+    .column-header {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--muted); margin-bottom: 12px;
       display: flex; align-items: center; gap: 8px;
     }
-    .count-badge {
+    .column-count {
+      background: var(--surface2); border-radius: 10px;
+      padding: 1px 7px; font-size: 11px;
+    }
+    .kanban-card {
       background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 20px; padding: 1px 8px;
-      font-size: 12px; color: var(--muted); font-weight: 500;
+      border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+      cursor: pointer; transition: border-color .15s;
     }
-    .error-box {
-      background: #2d1515; border: 1px solid #7f1d1d;
-      border-radius: var(--radius); padding: 14px 16px;
-      color: #fca5a5; font-size: 13px;
+    .kanban-card:hover { border-color: var(--blue); }
+    .kanban-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    .kanban-meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+    .owner-chip {
+      background: var(--surface); border-radius: 20px; padding: 1px 8px;
+      font-size: 10px; font-weight: 600; color: var(--blue);
     }
+
+    /* ── Modal ── */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; width: 420px; max-width: 90vw;
+    }
+    .modal h3 { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+    .modal-field { margin-bottom: 14px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+    select {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 9px 12px;
+      font-size: 13px; font-family: inherit;
+    }
+
+    /* ── Database tab (Notion-like) ── */
+    .db-filters {
+      display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .db-filters select, .db-filters input {
+      width: auto; flex: 0 0 auto;
+    }
+    table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    thead th {
+      background: var(--surface2); padding: 9px 12px; text-align: left;
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1px solid var(--border); cursor: pointer;
+      user-select: none; white-space: nowrap;
+    }
+    thead th:hover { color: var(--text); }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 9px 12px; vertical-align: top; }
+    .cell-edit { cursor: pointer; }
+    .cell-edit:hover { text-decoration: underline; }
+
+    /* ── Channel tab (Slack-like) ── */
+    .channel-feed { display: flex; flex-direction: column; gap: 14px; }
+    .msg {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px;
+    }
+    .msg-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--blue); display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; flex-shrink: 0;
+    }
+    .msg-sender { font-weight: 700; font-size: 13px; }
+    .msg-time { color: var(--muted); font-size: 11px; }
+    .msg-body { font-size: 13px; white-space: pre-wrap; color: var(--text); }
+    .msg-body em { color: var(--muted); font-style: normal; }
+
+    /* ── Loading / empty state ── */
+    .empty { color: var(--muted); font-size: 13px; padding: 40px 0; text-align: center; }
+    .loading { color: var(--muted); font-size: 13px; padding: 20px 0; }
+
+    /* ── Dispatch results ── */
+    .dispatch-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; padding: 6px 0; border-bottom: 1px solid var(--border);
+    }
+    .dispatch-row:last-child { border-bottom: none; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-ok  { background: var(--accent); }
+    .dot-err { background: var(--danger); }
   </style>
 </head>
 <body>
 <div class="page">
-
   <header>
-    <div class="logo">⚡</div>
     <div>
       <h1>Meeting Debrief Agent</h1>
-      <p>Turn meeting transcripts into structured, dispatched action items</p>
+      <p>AI-powered meeting analysis &amp; task management</p>
     </div>
   </header>
 
-  <!-- ── Input form ────────────────────────────────────────────────────────── -->
-  <div class="card" id="input-card">
-    <div class="card-title">New Debrief</div>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="run">▶ Run</button>
+    <button class="tab-btn" data-tab="board">📋 Board</button>
+    <button class="tab-btn" data-tab="database">🗄️ Database</button>
+    <button class="tab-btn" data-tab="channel">💬 Channel</button>
+  </nav>
 
-    <div class="field">
-      <label for="transcript">Meeting Transcript</label>
-      <textarea id="transcript" placeholder="Paste your Zoom / Google Meet transcript here…"></textarea>
+  <!-- ═══════════════════════════════════════════════════ TAB: RUN ═══ -->
+  <div class="tab-panel active" id="tab-run">
+    <div class="card">
+      <div class="card-title">Process Meeting Transcript</div>
+      <div class="form-grid">
+        <div>
+          <label>Meeting Transcript</label>
+          <textarea id="transcript" rows="10" placeholder="Paste your meeting transcript here…"></textarea>
+        </div>
+        <div>
+          <label>Team Members (one per line)</label>
+          <textarea id="team-members" rows="10" placeholder="Alice Smith&#10;Bob Jones&#10;Carol White"></textarea>
+        </div>
+      </div>
+      <button class="primary" id="run-btn" onclick="startRun()">Run Analysis</button>
     </div>
 
-    <div class="field">
-      <label for="team">Team Members <span style="font-weight:400">(comma-separated)</span></label>
-      <input type="text" id="team"
-             placeholder="Alice Smith, Bob Jones, Carol White, David Lee" />
+    <div class="card" id="progress-card" style="display:none">
+      <div class="card-title">Pipeline Progress</div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-steps" id="progress-steps"></div>
     </div>
 
-    <div class="btn-row">
-      <button class="btn-primary" id="submit-btn" onclick="runDebrief()">
-        ⚡ Process Meeting
-      </button>
-      <button class="btn-ghost" onclick="loadSample()">Load Sample</button>
-    </div>
+    <div id="result-area"></div>
   </div>
 
-  <!-- ── Error ──────────────────────────────────────────────────────────────── -->
-  <div class="error-box hidden" id="error-box"></div>
-
-  <!-- ── Pipeline progress ─────────────────────────────────────────────────── -->
-  <div class="card hidden" id="progress-card">
-    <div class="card-title" id="progress-title">
-      <span class="spinner" style="margin-right:8px"></span>
-      Running pipeline…
+  <!-- ═══════════════════════════════════════════════════ TAB: BOARD ═══ -->
+  <div class="tab-panel" id="tab-board">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div class="card-title" style="margin:0">Kanban Board</div>
+      <button class="primary" style="padding:6px 14px;font-size:12px;" onclick="loadBoard()">↻ Refresh</button>
     </div>
-    <div class="pipeline" id="pipeline-steps"></div>
+    <div class="board">
+      <div class="column">
+        <div class="column-header">
+          <span style="color:var(--muted)">●</span> To Do
+          <span class="column-count" id="count-todo">0</span>
+        </div>
+        <div id="col-todo"></div>
+      </div>
+      <div class="column">
+        <div class="column-header">
+          <span style="color:var(--blue)">●</span> In Progress
+          <span class="column-count" id="count-in_progress">0</span>
+        </div>
+        <div id="col-in_progress"></div>
+      </div>
+      <div class="column">
+        <div class="column-header">
+          <span style="color:var(--accent)">●</span> Done
+          <span class="column-count" id="count-done">0</span>
+        </div>
+        <div id="col-done"></div>
+      </div>
+    </div>
+    <div id="board-empty" class="empty" style="display:none">No tasks yet. Run a meeting analysis first.</div>
   </div>
 
-  <!-- ── Summary ────────────────────────────────────────────────────────────── -->
-  <div class="card hidden" id="summary-card">
-    <div class="section-title">📋 Meeting Summary</div>
-    <div id="summary-content"></div>
-  </div>
-
-  <!-- ── Action items ───────────────────────────────────────────────────────── -->
-  <div class="card hidden" id="items-card">
-    <div class="section-title">
-      ✅ Action Items
-      <span class="count-badge" id="items-count">0</span>
+  <!-- ═══════════════════════════════════════════════════ TAB: DATABASE ═══ -->
+  <div class="tab-panel" id="tab-database">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div class="card-title" style="margin:0">Task Database</div>
+      <button class="primary" style="padding:6px 14px;font-size:12px;" onclick="loadDatabase()">↻ Refresh</button>
     </div>
-    <div class="table-wrap">
+    <div class="db-filters">
+      <select id="filter-status" onchange="loadDatabase()">
+        <option value="">All Statuses</option>
+        <option value="todo">To Do</option>
+        <option value="in_progress">In Progress</option>
+        <option value="done">Done</option>
+      </select>
+      <input type="text" id="filter-owner" placeholder="Filter by owner…" oninput="debounce(loadDatabase,400)()" style="width:180px;">
+    </div>
+    <div class="card" style="padding:0; overflow:hidden;">
       <table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Description</th>
+            <th>Task</th>
             <th>Owner</th>
             <th>Deadline</th>
             <th>Priority</th>
             <th>Status</th>
+            <th>Meeting</th>
           </tr>
         </thead>
-        <tbody id="items-tbody"></tbody>
+        <tbody id="db-tbody"></tbody>
       </table>
     </div>
+    <div id="db-empty" class="empty" style="display:none">No tasks match your filters.</div>
   </div>
 
-  <!-- ── Dispatch results ───────────────────────────────────────────────────── -->
-  <div class="card hidden" id="dispatch-card">
-    <div class="section-title">🚀 Dispatched To</div>
-    <div class="dispatch-grid" id="dispatch-grid"></div>
+  <!-- ═══════════════════════════════════════════════════ TAB: CHANNEL ═══ -->
+  <div class="tab-panel" id="tab-channel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div class="card-title" style="margin:0">#meeting-debriefs</div>
+      <button class="primary" style="padding:6px 14px;font-size:12px;" onclick="loadChannel()">↻ Refresh</button>
+    </div>
+    <div class="channel-feed" id="channel-feed">
+      <div class="empty">No messages yet. Run a meeting analysis to see results here.</div>
+    </div>
   </div>
+</div>
 
-</div><!-- /page -->
+<!-- ═══════════════════════ TASK EDIT MODAL ═══════════════════════ -->
+<div class="modal-backdrop" id="modal" style="display:none" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Edit Task</h3>
+    <div class="modal-field">
+      <label>Status</label>
+      <select id="modal-status">
+        <option value="todo">To Do</option>
+        <option value="in_progress">In Progress</option>
+        <option value="done">Done</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Owner</label>
+      <input type="text" id="modal-owner" placeholder="Owner name">
+    </div>
+    <div class="modal-field">
+      <label>Deadline (YYYY-MM-DD)</label>
+      <input type="text" id="modal-deadline" placeholder="2026-06-01">
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeModal()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
+      <button class="primary" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
 
 <script>
-/* ── Pipeline node metadata ─────────────────────────────────────────────── */
-const NODE_META = {
-  summarize:          { label: 'Summarize',   icon: '📋' },
-  extract_actions:    { label: 'Extract',     icon: '🔍' },
-  assign_owners:      { label: 'Assign',      icon: '👤' },
-  validate:           { label: 'Validate',    icon: '✔️'  },
-  dispatch_notion:    { label: 'Notion',      icon: '📝' },
-  dispatch_jira:      { label: 'Jira',        icon: '🎯' },
-  dispatch_slack:     { label: 'Slack',       icon: '💬' },
-  aggregate_dispatch: { label: 'Aggregate',   icon: '🔗' },
-};
+// ── State ──────────────────────────────────────────────────────────────────
+let _modalTaskId = null;
+let _meetings = {};  // id → meeting row
 
-const PIPELINE_ORDER = [
-  'summarize', 'extract_actions', 'assign_owners', 'validate',
-  'dispatch_notion', 'dispatch_jira', 'dispatch_slack', 'aggregate_dispatch',
-];
-
-/* ── State ──────────────────────────────────────────────────────────────── */
-let activeNode = null;
-
-/* ── Helpers ─────────────────────────────────────────────────────────────── */
-function $(id) { return document.getElementById(id); }
-function show(id) { $(id).classList.remove('hidden'); }
-function hide(id) { $(id).classList.add('hidden'); }
-function esc(s)  { return String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-/* ── Build pipeline steps ─────────────────────────────────────────────────── */
-function buildPipelineSteps() {
-  const container = $('pipeline-steps');
-  container.innerHTML = '';
-  PIPELINE_ORDER.forEach((node, i) => {
-    const meta = NODE_META[node] || { label: node, icon: '◦' };
-    const step = document.createElement('div');
-    step.className = 'step';
-    step.id = `step-${node}`;
-    step.innerHTML = `<span class="dot"></span>${meta.icon} ${meta.label}`;
-    container.appendChild(step);
-    if (i < PIPELINE_ORDER.length - 1) {
-      const arrow = document.createElement('span');
-      arrow.className = 'step-arrow';
-      arrow.textContent = '›';
-      container.appendChild(arrow);
-    }
+// ── Tab switching ──────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+    if (tab === 'board') loadBoard();
+    if (tab === 'database') loadDatabase();
+    if (tab === 'channel') loadChannel();
   });
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function priorityBadge(p) {
+  return `<span class="badge badge-${p}">${p}</span>`;
+}
+function statusBadge(s) {
+  const label = s === 'in_progress' ? 'In Progress' : s === 'todo' ? 'To Do' : 'Done';
+  return `<span class="badge badge-${s}">${label}</span>`;
+}
+function fmt(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+}
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
-function markNodeActive(node) {
-  if (activeNode) {
-    const prev = $(`step-${activeNode}`);
-    if (prev) { prev.classList.remove('active'); prev.classList.add('done'); }
-  }
-  const el = $(`step-${node}`);
-  if (el) el.classList.add('active');
-  activeNode = node;
-}
+// ── Run tab ────────────────────────────────────────────────────────────────
+const NODES = ['summarize','extract_actions','assign_owners','validate','dispatch_local','aggregate_dispatch'];
 
-function markNodeDone(node) {
-  const el = $(`step-${node}`);
-  if (el) { el.classList.remove('active'); el.classList.add('done'); }
-  activeNode = null;
-}
+async function startRun() {
+  const transcript = document.getElementById('transcript').value.trim();
+  if (!transcript) { alert('Please enter a transcript.'); return; }
+  const teamRaw = document.getElementById('team-members').value.trim();
+  const team = teamRaw ? teamRaw.split('\n').map(s => s.trim()).filter(Boolean) : [];
 
-/* ── Render results ──────────────────────────────────────────────────────── */
-function renderSummary(summary) {
-  if (!summary) return;
-  const el = $('summary-content');
-  const participants = (summary.participants || []).map(p => `<span class="tag">${esc(p)}</span>`).join('');
-  const decisions    = (summary.key_decisions || [])
-    .map(d => `<div class="decision-item">${esc(d)}</div>`).join('');
-  el.innerHTML = `
-    <strong style="font-size:16px">${esc(summary.title)}</strong>
-    <div class="summary-meta">${participants}</div>
-    <div class="summary-text">${esc(summary.summary)}</div>
-    ${decisions ? `<div class="decisions"><div class="card-title" style="margin-top:12px">Key Decisions</div>${decisions}</div>` : ''}
-  `;
-  show('summary-card');
-}
-
-function renderItems(items) {
-  if (!items || !items.length) return;
-  $('items-count').textContent = items.length;
-  const tbody = $('items-tbody');
-  tbody.innerHTML = items.map(item => {
-    const priClass = { high: 'badge-high', medium: 'badge-medium', low: 'badge-low' }[item.priority] || 'badge-medium';
-    const status = item.needs_clarification
-      ? `<span class="badge badge-warn">⚠ Needs Clarification</span>`
-      : `<span class="badge badge-ok">✓ OK</span>`;
-    const context = item.context
-      ? `<div class="item-context">"${esc(item.context.slice(0, 120))}${item.context.length > 120 ? '…' : ''}"</div>`
-      : '';
-    return `
-      <tr>
-        <td><span class="item-id">${esc(item.id)}</span></td>
-        <td><div class="item-desc">${esc(item.description)}</div>${context}</td>
-        <td>${item.owner ? esc(item.owner) : '<span style="color:var(--muted)">—</span>'}</td>
-        <td>${item.deadline ? esc(item.deadline) : '<span style="color:var(--muted)">—</span>'}</td>
-        <td><span class="badge ${priClass}">${esc(item.priority)}</span></td>
-        <td>${status}</td>
-      </tr>`;
-  }).join('');
-  show('items-card');
-}
-
-function renderDispatch(results) {
-  if (!results || !results.length) return;
-  const byTool = {};
-  results.forEach(r => {
-    if (!byTool[r.tool]) byTool[r.tool] = [];
-    byTool[r.tool].push(r);
-  });
-
-  const TOOL_META = {
-    notion: { icon: '📝', name: 'Notion',  label: 'pages created' },
-    jira:   { icon: '🎯', name: 'Jira',    label: 'issues created' },
-    slack:  { icon: '💬', name: 'Slack',   label: 'message sent' },
-  };
-
-  const grid = $('dispatch-grid');
-  grid.innerHTML = ['notion', 'jira', 'slack'].map(tool => {
-    const meta    = TOOL_META[tool] || { icon: '📦', name: tool, label: 'items' };
-    const items   = byTool[tool] || [];
-    const success = items.every(r => r.success);
-    const ids     = items.filter(r => r.item_id).map(r => `<code style="font-size:11px;color:var(--muted)">${esc(r.item_id)}</code>`).join('<br>');
-    return `
-      <div class="dispatch-card ${success ? 'success' : 'failure'}">
-        <div class="dispatch-icon">${meta.icon}</div>
-        <div class="dispatch-name">${meta.name}</div>
-        <div class="dispatch-count">${items.length} ${meta.label}</div>
-        <div class="dispatch-status">
-          ${success
-            ? `<span class="badge badge-ok">✓ Success</span>`
-            : `<span class="badge badge-warn">⚠ Partial</span>`}
-        </div>
-        ${ids ? `<div style="margin-top:8px">${ids}</div>` : ''}
-      </div>`;
-  }).join('');
-  show('dispatch-card');
-}
-
-/* ── Main run function ───────────────────────────────────────────────────── */
-async function runDebrief() {
-  const transcript = $('transcript').value.trim();
-  const team       = $('team').value.trim();
-
-  if (!transcript) { alert('Please paste a meeting transcript.'); return; }
-
-  // Reset UI
-  hide('error-box');
-  hide('summary-card');
-  hide('items-card');
-  hide('dispatch-card');
-  activeNode = null;
-  buildPipelineSteps();
-  show('progress-card');
-  $('progress-title').innerHTML = '<span class="spinner" style="margin-right:8px;vertical-align:middle"></span> Running pipeline…';
-
-  const btn = $('submit-btn');
+  const btn = document.getElementById('run-btn');
   btn.disabled = true;
+  btn.textContent = 'Running…';
 
-  const teamMembers = team ? team.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const progressCard = document.getElementById('progress-card');
+  progressCard.style.display = '';
+  const fill = document.getElementById('progress-fill');
+  fill.style.width = '0%';
+  const stepsEl = document.getElementById('progress-steps');
+  stepsEl.innerHTML = NODES.map(n =>
+    `<div class="step" id="step-${n}">
+       <div class="step-dot"></div><span>${n.replace(/_/g,' ')}</span>
+     </div>`
+  ).join('');
+  document.getElementById('result-area').innerHTML = '';
 
-  try {
-    // 1. Create job
-    const jobResp = await fetch('/debrief/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript, team_members: teamMembers }),
-    });
-    if (!jobResp.ok) throw new Error(`Failed to create job: ${jobResp.status}`);
-    const { job_id } = await jobResp.json();
+  const jobResp = await fetch('/debrief/jobs', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({transcript, team_members: team}),
+  });
+  if (!jobResp.ok) { showError('Failed to create job'); btn.disabled=false; btn.textContent='Run Analysis'; return; }
+  const { job_id } = await jobResp.json();
 
-    // 2. Open SSE stream
-    await new Promise((resolve, reject) => {
-      const es = new EventSource(`/debrief/jobs/${job_id}/stream`);
+  const es = new EventSource(`/debrief/jobs/${job_id}/stream`);
+  let doneCount = 0;
 
-      es.addEventListener('progress', e => {
-        const { node } = JSON.parse(e.data);
-        markNodeActive(node);
-      });
+  es.addEventListener('progress', e => {
+    const { node } = JSON.parse(e.data);
+    const el = document.getElementById('step-' + node);
+    if (el) el.classList.add('done');
+    doneCount++;
+    fill.style.width = Math.min(100, Math.round(doneCount / NODES.length * 100)) + '%';
+  });
 
-      es.addEventListener('complete', e => {
-        es.close();
-        const data = JSON.parse(e.data);
-        // Mark last active node as done
-        PIPELINE_ORDER.forEach(n => markNodeDone(n));
-        $('progress-title').textContent = '✓ Pipeline complete';
-        renderSummary(data.summary);
-        renderItems(data.action_items);
-        renderDispatch(data.dispatch_results);
-        resolve();
-      });
-
-      es.onerror = err => {
-        es.close();
-        reject(new Error('Stream connection error'));
-      };
-    });
-
-  } catch (err) {
-    $('error-box').textContent = `Error: ${err.message}`;
-    show('error-box');
-    hide('progress-card');
-  } finally {
+  es.addEventListener('complete', e => {
+    es.close();
+    fill.style.width = '100%';
+    const data = JSON.parse(e.data);
+    renderResult(data);
     btn.disabled = false;
+    btn.textContent = 'Run Analysis';
+    loadBoard();
+    loadChannel();
+  });
+
+  es.addEventListener('error', e => {
+    es.close();
+    const msg = e.data ? JSON.parse(e.data).message : 'Stream error';
+    showError(msg);
+    btn.disabled = false;
+    btn.textContent = 'Run Analysis';
+  });
+}
+
+function showError(msg) {
+  document.getElementById('result-area').innerHTML =
+    `<div class="alert alert-error">Error: ${msg}</div>`;
+}
+
+function renderResult(data) {
+  const ra = document.getElementById('result-area');
+  let html = '';
+
+  if (data.summary) {
+    const s = data.summary;
+    html += `<div class="card">
+      <div class="card-title">Meeting Summary</div>
+      <div class="summary-box">
+        <div class="summary-title">${s.title || ''}</div>
+        <div class="summary-text">${s.summary || ''}</div>
+        <div class="kv-list">
+          ${s.date ? `<div class="kv"><strong>Date:</strong> ${s.date}</div>` : ''}
+          ${s.participants?.length ? `<div class="kv"><strong>Participants:</strong> ${s.participants.join(', ')}</div>` : ''}
+          ${s.next_meeting ? `<div class="kv"><strong>Next:</strong> ${s.next_meeting}</div>` : ''}
+        </div>
+        ${s.key_decisions?.length ? `<div style="margin-top:10px;font-size:12px;color:var(--muted)"><strong style="color:var(--text)">Key decisions:</strong> ${s.key_decisions.join(' · ')}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  if (data.action_items?.length) {
+    html += `<div class="card">
+      <div class="card-title">Action Items (${data.action_items.length})</div>
+      <div class="items-grid">`;
+    for (const item of data.action_items) {
+      const flag = item.needs_clarification
+        ? `<span class="badge badge-clarify" style="margin-left:6px;">⚠ clarify</span>` : '';
+      html += `<div class="item-row">
+        <div>
+          <div class="item-desc">${item.description}${flag}</div>
+          <div class="item-meta">
+            Owner: ${item.owner || 'Unassigned'} · Due: ${item.deadline || 'TBD'}
+          </div>
+        </div>
+        ${priorityBadge(item.priority)}
+        ${statusBadge(item.status || 'todo')}
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  if (data.dispatch_results?.length) {
+    html += `<div class="card">
+      <div class="card-title">Dispatch Results</div>`;
+    for (const r of data.dispatch_results) {
+      html += `<div class="dispatch-row">
+        <div class="dot ${r.success ? 'dot-ok' : 'dot-err'}"></div>
+        <strong>${r.tool}</strong>
+        <span style="color:var(--muted)">${r.success ? (r.item_id || 'ok') : (r.error_message || 'failed')}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  ra.innerHTML = html || '<div class="alert alert-info">No results returned.</div>';
+}
+
+// ── Board tab ──────────────────────────────────────────────────────────────
+async function loadBoard() {
+  const resp = await fetch('/tasks');
+  if (!resp.ok) return;
+  const tasks = await resp.json();
+
+  await _loadMeetings();
+
+  const cols = {todo: [], in_progress: [], done: []};
+  for (const t of tasks) (cols[t.status] || cols.todo).push(t);
+
+  const empty = tasks.length === 0;
+  document.getElementById('board-empty').style.display = empty ? '' : 'none';
+
+  for (const [status, items] of Object.entries(cols)) {
+    const el = document.getElementById('col-' + status);
+    document.getElementById('count-' + status).textContent = items.length;
+    el.innerHTML = items.map(t => `
+      <div class="kanban-card" onclick="openModal('${t.id}', '${t.status}', '${t.owner||''}', '${t.deadline||''}')">
+        <div class="kanban-card-title">${t.description}</div>
+        <div class="kanban-meta">
+          ${t.owner ? `<span class="owner-chip">${t.owner}</span>` : '<span style="color:var(--muted)">Unassigned</span>'}
+          ${t.deadline ? `<span>📅 ${t.deadline}</span>` : ''}
+          ${priorityBadge(t.priority)}
+        </div>
+      </div>`).join('');
   }
 }
 
-/* ── Load sample transcript ─────────────────────────────────────────────── */
-function loadSample() {
-  $('transcript').value = `Meeting: Q2 Sprint Planning
-Date: 2026-04-30
-Participants: Alice Smith, Bob Jones, Carol White, David Lee
+// ── Database tab ───────────────────────────────────────────────────────────
+async function loadDatabase() {
+  const status = document.getElementById('filter-status').value;
+  const owner = document.getElementById('filter-owner').value.trim();
 
-Alice Smith: Alright everyone, let's get started. We have a lot to cover today for Q2 planning.
+  let url = '/tasks?';
+  if (status) url += `status=${encodeURIComponent(status)}&`;
+  if (owner)  url += `owner=${encodeURIComponent(owner)}&`;
 
-Bob Jones: Should we start with the backlog review?
+  const resp = await fetch(url);
+  if (!resp.ok) return;
+  const tasks = await resp.json();
 
-Alice Smith: Yes. Carol, can you walk us through the priority items?
+  await _loadMeetings();
 
-Carol White: The top priority is finishing the authentication refactor — we decided to move to OAuth2. I'll need Bob to complete the backend token validation by May 15th.
+  const tbody = document.getElementById('db-tbody');
+  const empty = document.getElementById('db-empty');
 
-Bob Jones: Got it, I'll have token validation done by May 15th.
+  if (!tasks.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
 
-Alice Smith: David, what's the status on the mobile app performance issues?
-
-David Lee: Found the bottleneck — it's in the image loading pipeline. I'll fix the image caching layer and have a PR up by May 10th.
-
-Alice Smith: We also need to update the API documentation before the partner demo on May 20th. Carol, can you own that?
-
-Carol White: Yes, I'll have a draft ready by May 17th.
-
-Bob Jones: We also need to set up the staging environment for QA. Nobody has picked that up.
-
-Alice Smith: David, can you take that on by May 12th?
-
-David Lee: Sure, staging environment by May 12th.
-
-Bob Jones: I can also scope out the Grafana metrics migration and have a plan by May 8th.
-
-Alice Smith: Decisions today: OAuth2 for auth, Grafana for metrics, partner demo May 20th. Let's plan a check-in on May 18th at 2pm — I'll send the invite.`;
-
-  $('team').value = 'Alice Smith, Bob Jones, Carol White, David Lee';
+  tbody.innerHTML = tasks.map(t => {
+    const mtitle = _meetings[t.meeting_id]?.title || '—';
+    return `<tr>
+      <td class="cell-edit" onclick="openModal('${t.id}','${t.status}','${t.owner||''}','${t.deadline||''}')">${t.description}</td>
+      <td>${t.owner || '<em style="color:var(--muted)">Unassigned</em>'}</td>
+      <td>${t.deadline || '—'}</td>
+      <td>${priorityBadge(t.priority)}</td>
+      <td>${statusBadge(t.status)}</td>
+      <td style="color:var(--muted);font-size:12px;">${mtitle}</td>
+    </tr>`;
+  }).join('');
 }
 
-/* ── Enter key in team field ────────────────────────────────────────────── */
-$('team').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); runDebrief(); }
-});
+// ── Channel tab ────────────────────────────────────────────────────────────
+async function loadChannel() {
+  const resp = await fetch('/channel');
+  if (!resp.ok) return;
+  const msgs = await resp.json();
 
-/* ── Keyboard shortcut: Cmd/Ctrl + Enter in textarea ───────────────────── */
-$('transcript').addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runDebrief(); }
-});
+  const feed = document.getElementById('channel-feed');
+  if (!msgs.length) {
+    feed.innerHTML = '<div class="empty">No messages yet. Run a meeting analysis to see results here.</div>';
+    return;
+  }
+
+  await _loadMeetings();
+
+  feed.innerHTML = msgs.map(m => {
+    const meeting = _meetings[m.meeting_id];
+    const sender = meeting?.title || 'Meeting Debrief Agent';
+    const initials = sender.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const time = m.created_at ? fmt(m.created_at) : '';
+    const body = m.content
+      .replace(/\*(.*?)\*/g, '<strong>$1</strong>')
+      .replace(/_(.*?)_/g, '<em>$1</em>')
+      .replace(/\[NEEDS CLARIFICATION\]/g, '<span class="badge badge-clarify">⚠ clarify</span>');
+    return `<div class="msg">
+      <div class="msg-header">
+        <div class="avatar">${initials}</div>
+        <div>
+          <div class="msg-sender">${sender}</div>
+          <div class="msg-time">${time}</div>
+        </div>
+      </div>
+      <div class="msg-body">${body}</div>
+    </div>`;
+  }).join('');
+}
+
+async function _loadMeetings() {
+  const resp = await fetch('/meetings');
+  if (!resp.ok) return;
+  const meetings = await resp.json();
+  _meetings = {};
+  for (const m of meetings) _meetings[m.id] = m;
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+function openModal(taskId, status, owner, deadline) {
+  _modalTaskId = taskId;
+  document.getElementById('modal-status').value = status || 'todo';
+  document.getElementById('modal-owner').value = owner || '';
+  document.getElementById('modal-deadline').value = deadline || '';
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal')) return;
+  document.getElementById('modal').style.display = 'none';
+  _modalTaskId = null;
+}
+
+async function saveModal() {
+  if (!_modalTaskId) return;
+  const body = {
+    status: document.getElementById('modal-status').value,
+    owner: document.getElementById('modal-owner').value.trim() || null,
+    deadline: document.getElementById('modal-deadline').value.trim() || null,
+  };
+  await fetch(`/tasks/${_modalTaskId}`, {
+    method: 'PATCH',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  document.getElementById('modal').style.display = 'none';
+  _modalTaskId = null;
+  loadBoard();
+  loadDatabase();
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+setInterval(() => {
+  const activeTab = document.querySelector('.tab-btn.active')?.dataset?.tab;
+  if (activeTab === 'board') loadBoard();
+  else if (activeTab === 'database') loadDatabase();
+  else if (activeTab === 'channel') loadChannel();
+}, 5000);
 </script>
 </body>
 </html>
