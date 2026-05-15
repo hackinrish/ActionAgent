@@ -251,17 +251,17 @@ _FastAPI server with sync endpoint, SSE streaming, and HTML frontend._
 
 ---
 
-### Phase 6 — Live Integration & Hardening [TODO]
+### Phase 6 — Live Integration & Hardening [COMPLETE ✅]
 _Wire real credentials; add retry logic, structured logging, run history._
 
 **Deliverables:**
-- [ ] Integration tests for Notion, Jira, Slack (auto-skip when credentials absent)
-- [ ] Retry with exponential backoff on dispatch SDK errors
-- [ ] Structured JSON logging (`action_agent/utils/logging.py`)
-- [ ] `SqliteSaver` checkpointer for persistent run history
-- [ ] `GET /runs/{thread_id}` endpoint to retrieve prior run state
-
-**Test gate:** Integration tests GREEN with real credentials (CI skips when absent).
+- [x] Integration tests for Notion, Jira, Slack (auto-skip when credentials absent)
+- [x] Retry with exponential backoff (3 attempts) on dispatch SDK errors
+- [x] Structured JSON logging (`action_agent/utils/logging.py`) — `get_logger`, `log_node_event`
+- [x] `AsyncSqliteSaver` checkpointer for persistent run history
+- [x] `GET /runs/{thread_id}` endpoint to retrieve prior run state
+- [x] `POST /debrief` accepts optional `thread_id` for named runs
+- [x] `tests/test_phase6_hardening.py` — 26 passed, 3 skipped (live creds required)
 
 ---
 

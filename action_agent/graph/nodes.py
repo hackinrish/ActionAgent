@@ -1,7 +1,13 @@
 import asyncio
 from langchain_core.runnables import RunnableConfig
+from notion_client import AsyncClient
+from jira import JIRA
+from slack_sdk.web.async_client import AsyncWebClient
+
 from action_agent.models.state import MeetingDebriefState
 from action_agent.models.schemas import DispatchResult, ActionItem
+
+_MAX_DISPATCH_RETRIES = 3
 
 
 # ── Core pipeline nodes ───────────────────────────────────────────────────────
@@ -46,7 +52,7 @@ async def validate_node(state: MeetingDebriefState, config: RunnableConfig) -> d
     return {"validation_result": result, "validation_attempts": attempt}
 
 
-# ── Parallel dispatch nodes ───────────────────────────────────────────────────
+# ── Dispatch helpers ──────────────────────────────────────────────────────────
 
 def _items_from_state(state: dict) -> list[ActionItem]:
     vr = state.get("validation_result")
@@ -68,6 +74,20 @@ def _format_slack_message(summary, items: list[ActionItem]) -> str:
     return "\n".join(lines)
 
 
+async def _with_retry(coro_fn, max_retries: int = _MAX_DISPATCH_RETRIES):
+    """Call an async factory `coro_fn` up to `max_retries` times; raise last exception on exhaustion."""
+    last_exc: Exception | None = None
+    for _ in range(max_retries):
+        try:
+            return await coro_fn()
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
+# ── Parallel dispatch nodes ───────────────────────────────────────────────────
+
 async def dispatch_notion_node(state: dict, config: RunnableConfig) -> dict:
     from action_agent.config import settings
     items = _items_from_state(state)
@@ -78,20 +98,22 @@ async def dispatch_notion_node(state: dict, config: RunnableConfig) -> dict:
             results.append(DispatchResult(tool="notion", success=True, item_id=f"dry-run-{item.id}"))
         return {"dispatch_results": results or [DispatchResult(tool="notion", success=True, item_id="dry-run")]}
 
-    from notion_client import AsyncClient
     client = AsyncClient(auth=settings.notion_api_key)
     for item in items:
+        props: dict = {
+            "Name": {"title": [{"text": {"content": item.description}}]},
+            "Owner": {"rich_text": [{"text": {"content": item.owner or ""}}]},
+            "Priority": {"select": {"name": item.priority.value.capitalize()}},
+        }
+        if item.deadline:
+            props["Deadline"] = {"date": {"start": item.deadline}}
+
         try:
-            props: dict = {
-                "Name": {"title": [{"text": {"content": item.description}}]},
-                "Owner": {"rich_text": [{"text": {"content": item.owner or ""}}]},
-                "Priority": {"select": {"name": item.priority.value.capitalize()}},
-            }
-            if item.deadline:
-                props["Deadline"] = {"date": {"start": item.deadline}}
-            page = await client.pages.create(
-                parent={"database_id": settings.notion_database_id},
-                properties=props,
+            page = await _with_retry(
+                lambda p=props: client.pages.create(
+                    parent={"database_id": settings.notion_database_id},
+                    properties=p,
+                )
             )
             results.append(DispatchResult(tool="notion", success=True, item_id=page["id"]))
         except Exception as exc:
@@ -110,21 +132,20 @@ async def dispatch_jira_node(state: dict, config: RunnableConfig) -> dict:
             results.append(DispatchResult(tool="jira", success=True, item_id=f"DRY-{item.id}"))
         return {"dispatch_results": results or [DispatchResult(tool="jira", success=True, item_id="DRY-empty")]}
 
-    from jira import JIRA
     jira_client = JIRA(
         server=settings.jira_url,
         basic_auth=(settings.jira_email, settings.jira_api_token),
     )
     for item in items:
+        fields = {
+            "project": {"key": settings.jira_project_key},
+            "summary": item.description,
+            "description": item.context or item.description,
+            "issuetype": {"name": "Task"},
+        }
         try:
-            issue = await asyncio.to_thread(
-                jira_client.create_issue,
-                fields={
-                    "project": {"key": settings.jira_project_key},
-                    "summary": item.description,
-                    "description": item.context or item.description,
-                    "issuetype": {"name": "Task"},
-                },
+            issue = await _with_retry(
+                lambda f=fields: asyncio.to_thread(jira_client.create_issue, fields=f)
             )
             results.append(DispatchResult(tool="jira", success=True, item_id=issue.key))
         except Exception as exc:
@@ -141,10 +162,11 @@ async def dispatch_slack_node(state: dict, config: RunnableConfig) -> dict:
     if not settings.slack_bot_token:
         return {"dispatch_results": [DispatchResult(tool="slack", success=True, item_id="dry-run-slack")]}
 
-    from slack_sdk.web.async_client import AsyncWebClient
     client = AsyncWebClient(token=settings.slack_bot_token)
     try:
-        resp = await client.chat_postMessage(channel=settings.slack_channel, text=message)
+        resp = await _with_retry(
+            lambda: client.chat_postMessage(channel=settings.slack_channel, text=message)
+        )
         return {"dispatch_results": [DispatchResult(
             tool="slack", success=resp["ok"], item_id=resp.get("ts", "sent")
         )]}

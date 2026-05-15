@@ -7,13 +7,14 @@ Endpoints:
   POST /debrief                   → synchronous full pipeline result
   POST /debrief/jobs              → create streaming job, returns {"job_id": "..."}
   GET  /debrief/jobs/{id}/stream  → SSE stream of pipeline progress + final result
+  GET  /runs/{thread_id}          → retrieve prior run by thread_id
 """
 from __future__ import annotations
 
 import json
 import uuid
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -23,9 +24,15 @@ from pydantic import BaseModel
 app = FastAPI(title="Meeting Debrief Agent", version="0.1.0")
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
+_RUNS_DB = str(Path(__file__).parent / ".actionagent_runs.db")
 
 # In-memory job queue: job_id → TranscriptRequest
 _pending_jobs: dict[str, "TranscriptRequest"] = {}
+
+
+def _get_checkpointer():
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    return AsyncSqliteSaver.from_conn_string(_RUNS_DB)
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -33,6 +40,7 @@ _pending_jobs: dict[str, "TranscriptRequest"] = {}
 class TranscriptRequest(BaseModel):
     transcript: str
     team_members: list[str] = []
+    thread_id: Optional[str] = None
 
 
 class DebriefResponse(BaseModel):
@@ -49,7 +57,7 @@ async def health():
     return {"status": "ok", "version": "0.1.0"}
 
 
-# ── Shared pipeline runner ────────────────────────────────────────────────────
+# ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _build_initial_state(request: TranscriptRequest) -> dict:
     from action_agent.config import settings
@@ -79,20 +87,43 @@ def _merged_to_response(merged: dict) -> DebriefResponse:
     )
 
 
+def _checkpoint_to_response(checkpoint: dict) -> DebriefResponse:
+    """Build a DebriefResponse from a LangGraph checkpoint's channel_values."""
+    cv = checkpoint.get("channel_values", {})
+    status = cv.get("status", "complete")
+
+    vr = cv.get("validation_result")
+    if vr:
+        items = vr.valid_items + vr.flagged_items
+    else:
+        items = []
+
+    summary_obj = cv.get("summary")
+    return DebriefResponse(
+        status=status,
+        summary=summary_obj.model_dump() if summary_obj else None,
+        action_items=[i.model_dump() for i in items],
+        dispatch_results=[r.model_dump() for r in cv.get("dispatch_results", [])],
+    )
+
+
 # ── POST /debrief — synchronous ───────────────────────────────────────────────
 
 @app.post("/debrief", response_model=DebriefResponse)
 async def debrief(request: TranscriptRequest):
     from action_agent.graph.builder import build_graph
 
-    graph = build_graph()
+    thread_id = request.thread_id or f"api-{uuid.uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": thread_id}}
     initial_state = _build_initial_state(request)
-    config = {"configurable": {"thread_id": f"api-{uuid.uuid4().hex[:8]}"}}
     final_updates: dict = {}
-    async for event in graph.astream(initial_state, config, stream_mode="updates"):
-        for updates in event.values():
-            if isinstance(updates, dict):
-                final_updates.update(updates)
+
+    async with _get_checkpointer() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        async for event in graph.astream(initial_state, config, stream_mode="updates"):
+            for updates in event.values():
+                if isinstance(updates, dict):
+                    final_updates.update(updates)
 
     merged = {**initial_state, **final_updates}
     return _merged_to_response(merged)
@@ -121,17 +152,19 @@ async def stream_job(job_id: str):
         def sse(event_type: str, data: dict) -> str:
             return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
-        graph = build_graph()
+        thread_id = request.thread_id or f"sse-{job_id}"
+        config = {"configurable": {"thread_id": thread_id}}
         initial_state = _build_initial_state(request)
-        config = {"configurable": {"thread_id": f"sse-{job_id}"}}
         final_updates: dict = {}
 
         try:
-            async for event in graph.astream(initial_state, config, stream_mode="updates"):
-                for node_name, updates in event.items():
-                    yield sse("progress", {"node": node_name, "status": "complete"})
-                    if isinstance(updates, dict):
-                        final_updates.update(updates)
+            async with _get_checkpointer() as checkpointer:
+                graph = build_graph(checkpointer=checkpointer)
+                async for event in graph.astream(initial_state, config, stream_mode="updates"):
+                    for node_name, updates in event.items():
+                        yield sse("progress", {"node": node_name, "status": "complete"})
+                        if isinstance(updates, dict):
+                            final_updates.update(updates)
 
             merged = {**initial_state, **final_updates}
             response = _merged_to_response(merged)
@@ -149,6 +182,18 @@ async def stream_job(job_id: str):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── GET /runs/{thread_id} — retrieve prior run ────────────────────────────────
+
+@app.get("/runs/{thread_id}", response_model=DebriefResponse)
+async def get_run(thread_id: str):
+    config = {"configurable": {"thread_id": thread_id}}
+    async with _get_checkpointer() as checkpointer:
+        checkpoint = await checkpointer.aget(config)
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail=f"No run found for thread_id '{thread_id}'")
+    return _checkpoint_to_response(checkpoint)
 
 
 # ── Frontend static files ─────────────────────────────────────────────────────
