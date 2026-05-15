@@ -21,21 +21,15 @@ def run(
         None, "--team", "-t",
         help="Comma-separated team member names (overrides .env TEAM_MEMBERS)",
     ),
-    stub: bool = typer.Option(
-        True, "--stub/--no-stub",
-        help="Use stub MCP servers (no external API keys required)",
-    ),
 ):
     """Process a meeting transcript and push action items to Notion, Jira, and Slack."""
-    asyncio.run(_run(transcript, team, stub))
+    asyncio.run(_run(transcript, team))
 
 
-async def _run(transcript_path: Path, team_override: Optional[str], use_stubs: bool) -> None:
+async def _run(transcript_path: Path, team_override: Optional[str]) -> None:
     from action_agent.config import settings
     from action_agent.graph.builder import build_graph
     from action_agent.utils.formatting import build_action_items_table, print_dispatch_results
-
-    settings.use_stub_mcp = use_stubs
 
     if not transcript_path.exists():
         console.print(f"[red]File not found: {transcript_path}[/red]")
@@ -47,8 +41,6 @@ async def _run(transcript_path: Path, team_override: Optional[str], use_stubs: b
         if team_override
         else settings.team_members
     )
-
-    from action_agent.mcp.client import get_mcp_tools
 
     graph = build_graph()
     initial_state = {
@@ -67,14 +59,14 @@ async def _run(transcript_path: Path, team_override: Optional[str], use_stubs: b
 
     console.print(Panel("[bold green]Meeting Debrief Agent[/bold green]", expand=False))
 
-    async with get_mcp_tools() as mcp_tools:
-        config = {"configurable": {"thread_id": "cli-run-001", "mcp_tools": mcp_tools}}
-        final_state: dict = {}
-        async for event in graph.astream(initial_state, config, stream_mode="updates"):
-            for node_name, updates in event.items():
-                console.print(f"  [dim]✓ {node_name}[/dim]")
-                if isinstance(updates, dict):
-                    final_state.update(updates)
+    config = {"configurable": {"thread_id": "cli-run-001"}}
+    final_state: dict = {}
+    async for event in graph.astream(initial_state, config, stream_mode="updates"):
+        for node_name, updates in event.items():
+            console.print(f"  [dim]✓ {node_name}[/dim]")
+            if isinstance(updates, dict):
+                final_state.update(updates)
+
 
     merged = {**initial_state, **final_state}
     _print_results(merged)

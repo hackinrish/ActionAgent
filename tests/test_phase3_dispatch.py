@@ -1,104 +1,85 @@
 """
-Phase 3 tests — stub MCP dispatch with parallel fan-out.
-Tests the full graph with real MCP tool calls against stub servers.
+Phase 3 tests — dispatch nodes with direct SDK calls (dry-run when no credentials set).
 """
-import json
 from pathlib import Path
 
 TRANSCRIPT = (Path(__file__).parent / "fixtures" / "sample_transcript.txt").read_text()
 TEAM = ["Alice Smith", "Bob Jones", "Carol White", "David Lee"]
 
 
-# ── MCP tool loading ──────────────────────────────────────────────────────────
-
-async def test_mcp_tools_load_all_servers():
-    """get_mcp_tools() context manager yields tools for notion, jira, slack."""
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        assert "notion" in tools
-        assert "jira" in tools
-        assert "slack" in tools
-        assert len(tools["notion"]) > 0
-        assert len(tools["jira"]) > 0
-        assert len(tools["slack"]) > 0
-
-
-async def test_notion_stub_has_expected_tools():
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        names = {t.name for t in tools["notion"]}
-        assert "notion_create_page" in names
+def _make_state(items=None):
+    from action_agent.models.schemas import ActionItem, ValidationResult
+    if items is None:
+        items = [
+            ActionItem(id="ai-001", description="Write docs", owner="Alice Smith", deadline="2026-06-01"),
+            ActionItem(id="ai-002", description="Fix bug", owner="Bob Jones", deadline="2026-06-15"),
+        ]
+    return {
+        "validation_result": ValidationResult(valid_items=items, flagged_items=[], is_complete=True),
+        "summary": None,
+        "dispatch_results": [],
+    }
 
 
-async def test_jira_stub_has_expected_tools():
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        names = {t.name for t in tools["jira"]}
-        assert "jira_create_issue" in names
+# ── Dispatch unit tests (dry-run mode, no credentials required) ───────────────
+
+async def test_dispatch_notion_dry_run_succeeds():
+    """Without credentials, notion dispatch returns successful dry-run results."""
+    from action_agent.graph.nodes import dispatch_notion_node
+    state = _make_state()
+    result = await dispatch_notion_node(state, {"configurable": {}})
+    assert len(result["dispatch_results"]) == 2
+    assert all(r.success for r in result["dispatch_results"])
+    assert all(r.tool == "notion" for r in result["dispatch_results"])
 
 
-async def test_slack_stub_has_expected_tools():
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        names = {t.name for t in tools["slack"]}
-        assert "slack_post_message" in names
+async def test_dispatch_jira_dry_run_succeeds():
+    """Without credentials, jira dispatch returns successful dry-run results."""
+    from action_agent.graph.nodes import dispatch_jira_node
+    state = _make_state()
+    result = await dispatch_jira_node(state, {"configurable": {}})
+    assert len(result["dispatch_results"]) == 2
+    assert all(r.success for r in result["dispatch_results"])
+    assert all(r.tool == "jira" for r in result["dispatch_results"])
 
 
-# ── Direct stub tool calls ────────────────────────────────────────────────────
-
-async def test_notion_stub_create_page_returns_id():
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        create = next(t for t in tools["notion"] if t.name == "notion_create_page")
-        raw = await create.ainvoke({
-            "title": "Write unit tests",
-            "description": "Cover the new dispatch pipeline",
-            "owner": "Alice Smith",
-            "deadline": "2026-05-10",
-            "priority": "high",
-        })
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        assert "id" in data
-        assert "url" in data
-        assert data.get("status") == "created"
+async def test_dispatch_slack_dry_run_succeeds():
+    """Without credentials, slack dispatch returns a successful dry-run result."""
+    from action_agent.graph.nodes import dispatch_slack_node
+    state = _make_state()
+    result = await dispatch_slack_node(state, {"configurable": {}})
+    assert result["dispatch_results"][0].success
+    assert result["dispatch_results"][0].tool == "slack"
 
 
-async def test_jira_stub_create_issue_returns_key():
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        create = next(t for t in tools["jira"] if t.name == "jira_create_issue")
-        raw = await create.ainvoke({
-            "summary": "Fix authentication bug",
-            "description": "OAuth2 token validation failing",
-            "assignee": "Bob Jones",
-            "due_date": "2026-05-15",
-        })
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        assert "key" in data
-        assert data["key"].startswith("PROJ-")
-        assert data.get("status") == "created"
+async def test_dispatch_notion_results_have_item_ids():
+    from action_agent.graph.nodes import dispatch_notion_node
+    state = _make_state()
+    result = await dispatch_notion_node(state, {"configurable": {}})
+    assert all(r.item_id for r in result["dispatch_results"])
 
 
-async def test_slack_stub_post_message_returns_ok():
-    from action_agent.mcp.client import get_mcp_tools
-    async with get_mcp_tools() as tools:
-        post = next(t for t in tools["slack"] if t.name == "slack_post_message")
-        raw = await post.ainvoke({
-            "channel": "#meeting-debriefs",
-            "text": "Test message from debrief agent",
-        })
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        assert data.get("ok") is True
-        assert "ts" in data
+async def test_dispatch_jira_results_have_item_ids():
+    from action_agent.graph.nodes import dispatch_jira_node
+    state = _make_state()
+    result = await dispatch_jira_node(state, {"configurable": {}})
+    assert all(r.item_id for r in result["dispatch_results"])
 
 
-# ── Full graph with MCP dispatch ──────────────────────────────────────────────
+async def test_dispatch_empty_items_returns_fallback():
+    """Dispatch nodes with no action items return a single fallback result."""
+    from action_agent.models.schemas import ValidationResult
+    from action_agent.graph.nodes import dispatch_notion_node
+    state = {"validation_result": ValidationResult(valid_items=[], flagged_items=[], is_complete=True)}
+    result = await dispatch_notion_node(state, {"configurable": {}})
+    assert len(result["dispatch_results"]) == 1
+    assert result["dispatch_results"][0].success
+
+
+# ── Full graph integration ────────────────────────────────────────────────────
 
 async def _run_full_graph():
-    """Helper: run full graph with MCP tools loaded, return final state."""
     from action_agent.graph.builder import build_graph
-    from action_agent.mcp.client import get_mcp_tools
-
     graph = build_graph()
     initial_state = {
         "transcript": TRANSCRIPT,
@@ -113,15 +94,12 @@ async def _run_full_graph():
         "error": None,
         "status": "running",
     }
-
-    async with get_mcp_tools() as mcp_tools:
-        config = {"configurable": {"thread_id": "phase3-test", "mcp_tools": mcp_tools}}
-        final_updates: dict = {}
-        async for event in graph.astream(initial_state, config, stream_mode="updates"):
-            for updates in event.values():
-                if isinstance(updates, dict):
-                    final_updates.update(updates)
-
+    config = {"configurable": {"thread_id": "phase3-test"}}
+    final_updates: dict = {}
+    async for event in graph.astream(initial_state, config, stream_mode="updates"):
+        for updates in event.values():
+            if isinstance(updates, dict):
+                final_updates.update(updates)
     return {**initial_state, **final_updates}
 
 
@@ -133,9 +111,9 @@ async def test_full_graph_status_complete():
 async def test_dispatch_results_all_three_tools_present():
     state = await _run_full_graph()
     tool_names = {r.tool for r in state["dispatch_results"]}
-    assert "notion" in tool_names, "Missing notion dispatch result"
-    assert "jira" in tool_names, "Missing jira dispatch result"
-    assert "slack" in tool_names, "Missing slack dispatch result"
+    assert "notion" in tool_names
+    assert "jira" in tool_names
+    assert "slack" in tool_names
 
 
 async def test_dispatch_results_all_successful():
@@ -146,23 +124,23 @@ async def test_dispatch_results_all_successful():
 
 async def test_dispatch_notion_results_have_ids():
     state = await _run_full_graph()
-    notion_results = [r for r in state["dispatch_results"] if r.tool == "notion"]
-    assert len(notion_results) > 0
-    assert all(r.item_id for r in notion_results)
+    notion = [r for r in state["dispatch_results"] if r.tool == "notion"]
+    assert len(notion) > 0
+    assert all(r.item_id for r in notion)
 
 
 async def test_dispatch_jira_results_have_keys():
     state = await _run_full_graph()
-    jira_results = [r for r in state["dispatch_results"] if r.tool == "jira"]
-    assert len(jira_results) > 0
-    assert all(r.item_id for r in jira_results)
+    jira = [r for r in state["dispatch_results"] if r.tool == "jira"]
+    assert len(jira) > 0
+    assert all(r.item_id for r in jira)
 
 
 async def test_valid_items_were_dispatched():
     state = await _run_full_graph()
     vr = state.get("validation_result")
     assert vr is not None
-    assert len(vr.valid_items) > 0, "Expected at least some fully-resolved action items"
+    assert len(vr.valid_items) > 0
 
 
 async def test_summary_populated():

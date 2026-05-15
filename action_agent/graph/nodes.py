@@ -1,4 +1,4 @@
-import json
+import asyncio
 from langchain_core.runnables import RunnableConfig
 from action_agent.models.state import MeetingDebriefState
 from action_agent.models.schemas import DispatchResult, ActionItem
@@ -55,118 +55,99 @@ def _items_from_state(state: dict) -> list[ActionItem]:
     return vr.valid_items + vr.flagged_items
 
 
-def _get_tool(mcp_tools: dict, server: str, name: str):
-    return next((t for t in mcp_tools.get(server, []) if t.name == name), None)
-
-
-def _parse_result(raw) -> dict:
-    if isinstance(raw, str):
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            return {"raw": raw}
-    return raw if isinstance(raw, dict) else {}
-
-
-async def dispatch_notion_node(state: dict, config: RunnableConfig) -> dict:
-    mcp_tools = config.get("configurable", {}).get("mcp_tools", {})
-    create = _get_tool(mcp_tools, "notion", "notion_create_page")
-    items = _items_from_state(state)
-
-    results: list[DispatchResult] = []
-    for item in items:
-        try:
-            if create:
-                raw = await create.ainvoke({
-                    "title": item.description,
-                    "description": item.description
-                    + (f"\n\n[NEEDS CLARIFICATION: {item.clarification_reason}]"
-                       if item.needs_clarification else ""),
-                    "owner": item.owner or "",
-                    "deadline": item.deadline or "",
-                    "priority": item.priority.value,
-                })
-                data = _parse_result(raw)
-                results.append(DispatchResult(
-                    tool="notion",
-                    success=True,
-                    item_id=data.get("id", f"notion-{item.id}"),
-                ))
-            else:
-                results.append(DispatchResult(tool="notion", success=True, item_id=f"stub-{item.id}"))
-        except Exception as exc:
-            results.append(DispatchResult(tool="notion", success=False, error_message=str(exc)))
-
-    if not results:
-        results.append(DispatchResult(tool="notion", success=True, item_id="notion-empty"))
-
-    return {"dispatch_results": results}
-
-
-async def dispatch_jira_node(state: dict, config: RunnableConfig) -> dict:
-    mcp_tools = config.get("configurable", {}).get("mcp_tools", {})
-    create = _get_tool(mcp_tools, "jira", "jira_create_issue")
-    items = _items_from_state(state)
-
-    results: list[DispatchResult] = []
-    for item in items:
-        try:
-            if create:
-                raw = await create.ainvoke({
-                    "summary": item.description,
-                    "description": item.context or item.description,
-                    "assignee": item.owner or "",
-                    "due_date": item.deadline or "",
-                    "priority": item.priority.value.capitalize(),
-                })
-                data = _parse_result(raw)
-                results.append(DispatchResult(
-                    tool="jira",
-                    success=True,
-                    item_id=data.get("key", f"PROJ-{item.id}"),
-                ))
-            else:
-                results.append(DispatchResult(tool="jira", success=True, item_id=f"PROJ-stub-{item.id}"))
-        except Exception as exc:
-            results.append(DispatchResult(tool="jira", success=False, error_message=str(exc)))
-
-    if not results:
-        results.append(DispatchResult(tool="jira", success=True, item_id="PROJ-empty"))
-
-    return {"dispatch_results": results}
-
-
-async def dispatch_slack_node(state: dict, config: RunnableConfig) -> dict:
-    """Posts a single summary message to Slack (not one per item)."""
-    mcp_tools = config.get("configurable", {}).get("mcp_tools", {})
-    post = _get_tool(mcp_tools, "slack", "slack_post_message")
-
-    from action_agent.config import settings
-    summary = state.get("summary")
-    items = _items_from_state(state)
-
+def _format_slack_message(summary, items: list[ActionItem]) -> str:
     lines = ["*Meeting Debrief — Action Items*"]
     if summary:
         lines.append(f"_{summary.title}_\n")
     for item in items:
-        flag = " ⚠️ NEEDS CLARIFICATION" if item.needs_clarification else ""
+        flag = " NEEDS CLARIFICATION" if item.needs_clarification else ""
         owner = item.owner or "Unassigned"
         deadline = item.deadline or "No deadline"
         lines.append(f"• [{item.id}] {item.description}")
         lines.append(f"  Owner: {owner} | Due: {deadline} | Priority: {item.priority.value}{flag}")
-    message = "\n".join(lines)
+    return "\n".join(lines)
 
+
+async def dispatch_notion_node(state: dict, config: RunnableConfig) -> dict:
+    from action_agent.config import settings
+    items = _items_from_state(state)
+    results: list[DispatchResult] = []
+
+    if not settings.notion_api_key or not settings.notion_database_id:
+        for item in items:
+            results.append(DispatchResult(tool="notion", success=True, item_id=f"dry-run-{item.id}"))
+        return {"dispatch_results": results or [DispatchResult(tool="notion", success=True, item_id="dry-run")]}
+
+    from notion_client import AsyncClient
+    client = AsyncClient(auth=settings.notion_api_key)
+    for item in items:
+        try:
+            props: dict = {
+                "Name": {"title": [{"text": {"content": item.description}}]},
+                "Owner": {"rich_text": [{"text": {"content": item.owner or ""}}]},
+                "Priority": {"select": {"name": item.priority.value.capitalize()}},
+            }
+            if item.deadline:
+                props["Deadline"] = {"date": {"start": item.deadline}}
+            page = await client.pages.create(
+                parent={"database_id": settings.notion_database_id},
+                properties=props,
+            )
+            results.append(DispatchResult(tool="notion", success=True, item_id=page["id"]))
+        except Exception as exc:
+            results.append(DispatchResult(tool="notion", success=False, error_message=str(exc)))
+
+    return {"dispatch_results": results or [DispatchResult(tool="notion", success=True, item_id="notion-empty")]}
+
+
+async def dispatch_jira_node(state: dict, config: RunnableConfig) -> dict:
+    from action_agent.config import settings
+    items = _items_from_state(state)
+    results: list[DispatchResult] = []
+
+    if not settings.jira_url or not settings.jira_api_token:
+        for item in items:
+            results.append(DispatchResult(tool="jira", success=True, item_id=f"DRY-{item.id}"))
+        return {"dispatch_results": results or [DispatchResult(tool="jira", success=True, item_id="DRY-empty")]}
+
+    from jira import JIRA
+    jira_client = JIRA(
+        server=settings.jira_url,
+        basic_auth=(settings.jira_email, settings.jira_api_token),
+    )
+    for item in items:
+        try:
+            issue = await asyncio.to_thread(
+                jira_client.create_issue,
+                fields={
+                    "project": {"key": settings.jira_project_key},
+                    "summary": item.description,
+                    "description": item.context or item.description,
+                    "issuetype": {"name": "Task"},
+                },
+            )
+            results.append(DispatchResult(tool="jira", success=True, item_id=issue.key))
+        except Exception as exc:
+            results.append(DispatchResult(tool="jira", success=False, error_message=str(exc)))
+
+    return {"dispatch_results": results or [DispatchResult(tool="jira", success=True, item_id="PROJ-empty")]}
+
+
+async def dispatch_slack_node(state: dict, config: RunnableConfig) -> dict:
+    from action_agent.config import settings
+    items = _items_from_state(state)
+    message = _format_slack_message(state.get("summary"), items)
+
+    if not settings.slack_bot_token:
+        return {"dispatch_results": [DispatchResult(tool="slack", success=True, item_id="dry-run-slack")]}
+
+    from slack_sdk.web.async_client import AsyncWebClient
+    client = AsyncWebClient(token=settings.slack_bot_token)
     try:
-        if post:
-            raw = await post.ainvoke({"channel": settings.slack_channel, "text": message})
-            data = _parse_result(raw)
-            success = data.get("ok", True)
-            ts = data.get("ts", "")
-            return {"dispatch_results": [DispatchResult(
-                tool="slack", success=success, item_id=ts or "slack-sent"
-            )]}
-        else:
-            return {"dispatch_results": [DispatchResult(tool="slack", success=True, item_id="slack-stub")]}
+        resp = await client.chat_postMessage(channel=settings.slack_channel, text=message)
+        return {"dispatch_results": [DispatchResult(
+            tool="slack", success=resp["ok"], item_id=resp.get("ts", "sent")
+        )]}
     except Exception as exc:
         return {"dispatch_results": [DispatchResult(tool="slack", success=False, error_message=str(exc))]}
 
@@ -175,12 +156,4 @@ async def aggregate_dispatch_node(state: MeetingDebriefState, config: RunnableCo
     results = state.get("dispatch_results", [])
     failures = [r for r in results if not r.success]
     status = "error" if failures else "complete"
-    # Re-emit the full accumulated dispatch_results so that any downstream
-    # reader that merges state via plain dict.update() (e.g. astream test helpers)
-    # sees all results rather than just the last parallel node's slice.
-    # operator.add will concatenate this with the existing list in LangGraph state,
-    # so we clear existing first by returning a fresh list that replaces via a
-    # separate reducer. Since dispatch_results uses operator.add we emit an empty
-    # list here — the accumulated results are already in state from the parallel
-    # nodes. Instead, we place the full list in a canonical key through status.
     return {"status": status, "dispatch_results": results}

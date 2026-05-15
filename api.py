@@ -84,18 +84,15 @@ def _merged_to_response(merged: dict) -> DebriefResponse:
 @app.post("/debrief", response_model=DebriefResponse)
 async def debrief(request: TranscriptRequest):
     from action_agent.graph.builder import build_graph
-    from action_agent.mcp.client import get_mcp_tools
 
     graph = build_graph()
     initial_state = _build_initial_state(request)
-
-    async with get_mcp_tools() as mcp_tools:
-        config = {"configurable": {"thread_id": f"api-{uuid.uuid4().hex[:8]}", "mcp_tools": mcp_tools}}
-        final_updates: dict = {}
-        async for event in graph.astream(initial_state, config, stream_mode="updates"):
-            for updates in event.values():
-                if isinstance(updates, dict):
-                    final_updates.update(updates)
+    config = {"configurable": {"thread_id": f"api-{uuid.uuid4().hex[:8]}"}}
+    final_updates: dict = {}
+    async for event in graph.astream(initial_state, config, stream_mode="updates"):
+        for updates in event.values():
+            if isinstance(updates, dict):
+                final_updates.update(updates)
 
     merged = {**initial_state, **final_updates}
     return _merged_to_response(merged)
@@ -120,28 +117,21 @@ async def stream_job(job_id: str):
 
     async def generate() -> AsyncIterator[str]:
         from action_agent.graph.builder import build_graph
-        from action_agent.mcp.client import get_mcp_tools
 
         def sse(event_type: str, data: dict) -> str:
             return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
         graph = build_graph()
         initial_state = _build_initial_state(request)
+        config = {"configurable": {"thread_id": f"sse-{job_id}"}}
         final_updates: dict = {}
 
         try:
-            async with get_mcp_tools() as mcp_tools:
-                config = {
-                    "configurable": {
-                        "thread_id": f"sse-{job_id}",
-                        "mcp_tools": mcp_tools,
-                    }
-                }
-                async for event in graph.astream(initial_state, config, stream_mode="updates"):
-                    for node_name, updates in event.items():
-                        yield sse("progress", {"node": node_name, "status": "complete"})
-                        if isinstance(updates, dict):
-                            final_updates.update(updates)
+            async for event in graph.astream(initial_state, config, stream_mode="updates"):
+                for node_name, updates in event.items():
+                    yield sse("progress", {"node": node_name, "status": "complete"})
+                    if isinstance(updates, dict):
+                        final_updates.update(updates)
 
             merged = {**initial_state, **final_updates}
             response = _merged_to_response(merged)

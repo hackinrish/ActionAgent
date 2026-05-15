@@ -33,9 +33,10 @@ def test_graph_import():
     from action_agent.graph.conditions import route_after_validation
 
 
-def test_mcp_import():
-    from action_agent.mcp.config import STUB_CONNECTIONS, ACTIVE_CONNECTIONS
-    from action_agent.mcp.client import get_mcp_tools
+def test_dispatch_nodes_import():
+    from action_agent.graph.nodes import (
+        dispatch_notion_node, dispatch_jira_node, dispatch_slack_node,
+    )
 
 
 # ── Pydantic model validation ─────────────────────────────────────────────────
@@ -177,21 +178,21 @@ def test_validation_mixed_items():
     assert len(result.flagged_items) == 1
 
 
-# ── Stub MCP servers importable ───────────────────────────────────────────────
+# ── Direct SDK packages importable ───────────────────────────────────────────
 
-def test_notion_stub_importable():
-    from action_agent.mcp.stubs import notion_stub
-    assert notion_stub.mcp is not None
-
-
-def test_jira_stub_importable():
-    from action_agent.mcp.stubs import jira_stub
-    assert jira_stub.mcp is not None
+def test_notion_client_importable():
+    import notion_client
+    assert notion_client is not None
 
 
-def test_slack_stub_importable():
-    from action_agent.mcp.stubs import slack_stub
-    assert slack_stub.mcp is not None
+def test_jira_importable():
+    import jira
+    assert jira is not None
+
+
+def test_slack_sdk_importable():
+    import slack_sdk
+    assert slack_sdk is not None
 
 
 # ── CLI help ──────────────────────────────────────────────────────────────────
